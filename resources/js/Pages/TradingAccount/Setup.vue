@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, useForm, router } from '@inertiajs/vue3';
 import InputLabel from '@/Components/InputLabel.vue';
 import TextInput from '@/Components/TextInput.vue';
 import InputError from '@/Components/InputError.vue';
@@ -16,12 +16,18 @@ const form = useForm({
 const submit = () => {
     form.post(route('trading-account.store'));
 };
+
+const logout = () => {
+    // Menggunakan router Inertia untuk logout
+    router.post(route('logout'));
+};
 </script>
 
 <template>
     <Head title="Setup Trading Account" />
 
     <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+        
         <div class="mb-8 text-center">
             <h1 class="text-3xl font-bold mb-2">Welcome to Tradyne</h1>
             <p class="text-gray-500 dark:text-gray-400">Let's set up your trading journal first.</p>
@@ -69,7 +75,6 @@ const submit = () => {
                         placeholder="e.g. Binance, Bybit, Pluang, Tokocrypto"
                         required
                     />
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Type the name of the exchange you use.</p>
                     <InputError class="mt-2" :message="form.errors.name" />
                 </div>
 
@@ -106,11 +111,22 @@ const submit = () => {
                     <InputError class="mt-2" :message="form.errors.strategy_type" />
                 </div>
 
-                <div class="flex items-center justify-end mt-4">
+                <div class="mt-8 space-y-3">
                     <PrimaryButton class="w-full justify-center py-3" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
                         Create Journal Space &rarr;
                     </PrimaryButton>
+                    
+                    <div class="text-center">
+                         <button 
+                            type="button" 
+                            @click="logout" 
+                            class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline transition"
+                        >
+                            Not you? Log Out
+                        </button>
+                    </div>
                 </div>
+
             </form>
         </div>
     </div>

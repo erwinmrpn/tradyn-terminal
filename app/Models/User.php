@@ -6,6 +6,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\Relations\HasMany; // Import tipe data HasMany
+use App\Models\TradingAccount;
 
 class User extends Authenticatable
 {
@@ -44,5 +46,14 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Relasi ke Trading Account (Journal)
+     * User bisa memiliki banyak akun trading.
+     */
+    public function tradingAccounts(): HasMany
+    {
+        return $this->hasMany(TradingAccount::class);
     }
 }
