@@ -1,133 +1,139 @@
 <script setup lang="ts">
-import { Head, useForm, router } from '@inertiajs/vue3';
-import InputLabel from '@/Components/InputLabel.vue';
-import TextInput from '@/Components/TextInput.vue';
-import InputError from '@/Components/InputError.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
+import { Head, useForm } from '@inertiajs/vue3';
 
+// Setup Form menggunakan Inertia
 const form = useForm({
-    currency: 'USD',
-    balance: '',
-    name: '', // Nama Broker
-    market_type: 'Crypto',
-    strategy_type: 'Spot',
+    name: '',            // Nama Akun (misal: "Akun Scalping")
+    exchange: '',        // Nama Platform (Text Bebas)
+    strategy_type: 'SPOT', // Tipe Strategi (Dropdown)
+    currency: 'USD',     // Mata Uang
+    balance: '',         // Saldo Awal
 });
 
 const submit = () => {
-    form.post(route('trading-account.store'));
-};
-
-const logout = () => {
-    // Menggunakan router Inertia untuk logout
-    router.post(route('logout'));
+    // Kirim data ke route 'trading-account.store'
+    form.post(route('trading-account.store'), {
+        onFinish: () => form.reset(),
+    });
 };
 </script>
 
 <template>
     <Head title="Setup Trading Account" />
 
-    <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-[#0a0b0d] text-gray-300">
         
-        <div class="mb-8 text-center">
-            <h1 class="text-3xl font-bold mb-2">Welcome to Tradyne</h1>
-            <p class="text-gray-500 dark:text-gray-400">Let's set up your trading journal first.</p>
+        <div class="mb-6 text-center">
+            <div class="w-12 h-12 bg-blue-600 rounded mx-auto flex items-center justify-center text-white font-bold text-xl mb-4">
+                T
+            </div>
+            <h2 class="text-2xl font-bold text-white">Setup Your Trading Account</h2>
+            <p class="text-gray-500 text-sm mt-2">
+                Create your first portfolio to start tracking your journey.
+            </p>
         </div>
 
-        <div class="w-full sm:max-w-lg mt-6 px-8 py-8 bg-white dark:bg-gray-800 shadow-md overflow-hidden sm:rounded-lg border border-gray-200 dark:border-gray-700">
+        <div class="w-full sm:max-w-lg mt-6 px-8 py-8 bg-[#121317] border border-[#1f2128] shadow-xl overflow-hidden sm:rounded-xl">
+            
             <form @submit.prevent="submit" class="space-y-6">
                 
                 <div>
-                    <InputLabel value="Base Currency" />
-                    <div class="mt-1 flex gap-4">
-                        <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" v-model="form.currency" value="USD" class="text-indigo-600 focus:ring-indigo-500" />
-                            <span>USD ($)</span>
-                        </label>
-                        <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="radio" v-model="form.currency" value="IDR" class="text-indigo-600 focus:ring-indigo-500" />
-                            <span>IDR (Rp)</span>
-                        </label>
-                    </div>
-                    <InputError class="mt-2" :message="form.errors.currency" />
-                </div>
-
-                <div>
-                    <InputLabel for="balance" value="Initial Balance (Modal Awal)" />
-                    <TextInput
-                        id="balance"
-                        type="number"
-                        class="mt-1 block w-full"
-                        v-model="form.balance"
-                        placeholder="e.g. 1000"
-                        required
+                    <label for="name" class="block mb-2 text-sm font-medium text-white">Account Name</label>
+                    <input 
+                        id="name"
+                        type="text" 
+                        v-model="form.name"
+                        class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 placeholder-gray-500" 
+                        placeholder="e.g. My Binance Spot, Scalping Account" 
+                        required 
                         autofocus
                     />
-                    <InputError class="mt-2" :message="form.errors.balance" />
+                    <div v-if="form.errors.name" class="text-red-500 text-xs mt-1">{{ form.errors.name }}</div>
                 </div>
 
                 <div>
-                    <InputLabel for="name" value="Exchange / Broker Name" />
-                    <TextInput
-                        id="name"
-                        type="text"
-                        class="mt-1 block w-full"
-                        v-model="form.name"
-                        placeholder="e.g. Binance, Bybit, Pluang, Tokocrypto"
-                        required
+                    <label for="exchange" class="block mb-2 text-sm font-medium text-white">Exchange / Platform</label>
+                    <input 
+                        id="exchange"
+                        type="text" 
+                        v-model="form.exchange"
+                        class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 placeholder-gray-500" 
+                        placeholder="e.g. Binance, Bybit, Metamask, Tokocrypto" 
+                        required 
                     />
-                    <InputError class="mt-2" :message="form.errors.name" />
+                    <p class="mt-1 text-xs text-gray-500">Type the name of the exchange or wallet.</p>
+                    <div v-if="form.errors.exchange" class="text-red-500 text-xs mt-1">{{ form.errors.exchange }}</div>
                 </div>
 
-                <div>
-                    <InputLabel value="Market Preference" />
-                    <select v-model="form.market_type" class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">
-                        <option value="Crypto">Cryptocurrency</option>
-                        <option value="Stock">Stock Market (Saham)</option>
-                        <option value="Forex">Forex</option>
-                    </select>
-                    <InputError class="mt-2" :message="form.errors.market_type" />
-                </div>
-
-                <div>
-                    <InputLabel value="Trading Type" />
-                    <div class="grid grid-cols-2 gap-4 mt-1">
-                        <div 
-                            @click="form.strategy_type = 'Spot'"
-                            :class="form.strategy_type === 'Spot' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-gray-700'"
-                            class="cursor-pointer border rounded-md p-4 text-center hover:border-indigo-400 transition"
-                        >
-                            <span class="font-bold block">SPOT</span>
-                            <span class="text-xs text-gray-500">Asset Ownership</span>
-                        </div>
-                        <div 
-                            @click="form.strategy_type = 'Futures'"
-                            :class="form.strategy_type === 'Futures' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-gray-700'"
-                            class="cursor-pointer border rounded-md p-4 text-center hover:border-indigo-400 transition"
-                        >
-                            <span class="font-bold block">FUTURES</span>
-                            <span class="text-xs text-gray-500">Contract / Leverage</span>
-                        </div>
-                    </div>
-                    <InputError class="mt-2" :message="form.errors.strategy_type" />
-                </div>
-
-                <div class="mt-8 space-y-3">
-                    <PrimaryButton class="w-full justify-center py-3" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
-                        Create Journal Space &rarr;
-                    </PrimaryButton>
+                <div class="grid grid-cols-2 gap-4">
                     
-                    <div class="text-center">
-                         <button 
-                            type="button" 
-                            @click="logout" 
-                            class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline transition"
+                    <div>
+                        <label for="strategy_type" class="block mb-2 text-sm font-medium text-white">Market Type</label>
+                        <select 
+                            id="strategy_type" 
+                            v-model="form.strategy_type"
+                            class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
                         >
-                            Not you? Log Out
-                        </button>
+                            <option value="SPOT">Spot</option>
+                            <option value="FUTURES">Futures</option>
+                            <option value="MARGIN">Margin</option>
+                            <option value="OPTION">Options</option>
+                        </select>
                     </div>
+
+                    <div>
+                        <label for="currency" class="block mb-2 text-sm font-medium text-white">Base Currency</label>
+                        <select 
+                            id="currency" 
+                            v-model="form.currency"
+                            class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                        >
+                            <option value="USD">USD ($)</option>
+                            <option value="IDR">IDR (Rp)</option>
+                            <option value="USDT">USDT</option>
+                            <option value="BTC">BTC</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="balance" class="block mb-2 text-sm font-medium text-white">Initial Balance</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                            <span class="text-gray-400 font-bold text-sm">
+                                {{ form.currency === 'IDR' ? 'Rp' : '$' }}
+                            </span>
+                        </div>
+                        <input 
+                            id="balance"
+                            type="number" 
+                            v-model="form.balance"
+                            step="0.01"
+                            class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-8 p-2.5 placeholder-gray-500" 
+                            placeholder="0.00" 
+                            required 
+                        />
+                    </div>
+                    <div v-if="form.errors.balance" class="text-red-500 text-xs mt-1">{{ form.errors.balance }}</div>
+                </div>
+
+                <div class="pt-4">
+                    <button 
+                        type="submit" 
+                        class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all shadow-lg shadow-blue-500/30"
+                        :class="{ 'opacity-50 cursor-not-allowed': form.processing }"
+                        :disabled="form.processing"
+                    >
+                        <span v-if="form.processing">Setting up...</span>
+                        <span v-else>Create Account & Start</span>
+                    </button>
                 </div>
 
             </form>
         </div>
+        
+        <p class="mt-8 text-center text-xs text-gray-600">
+            &copy; 2025 Tradyn Terminal. All rights reserved.
+        </p>
     </div>
 </template>

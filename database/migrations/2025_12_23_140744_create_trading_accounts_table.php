@@ -10,12 +10,17 @@ return new class extends Migration
     {
         Schema::create('trading_accounts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade'); // Terhubung ke user
-            $table->string('name'); // Nama Broker (Bybit, Binance, dll input sendiri)
-            $table->string('currency', 10); // USD, IDR, dll
-            $table->decimal('balance', 15, 2); // Nominal Saldo Awal
-            $table->string('market_type'); // Crypto atau Stock
-            $table->string('strategy_type'); // Spot atau Futures
+            
+            // Relasi ke User (Satu User bisa punya banyak akun ini)
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            
+            $table->string('name');          // Nama Akun (misal: "Akun Utama")
+            $table->string('exchange');      // BINANCE, BYBIT, TOKOCRYPTO, dll
+            $table->string('strategy_type'); // SPOT, FUTURES, MARGIN
+            
+            $table->decimal('balance', 15, 2)->default(0);
+            $table->string('currency')->default('USD'); // USD, IDR
+            
             $table->timestamps();
         });
     }

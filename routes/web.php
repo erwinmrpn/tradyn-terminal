@@ -7,6 +7,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Http\Controllers\AccountTransactionController;
+use App\Http\Controllers\DashboardController; // <--- Import ini
 
 // --- PUBLIC ROUTES ---
 Route::get('/', function () {
@@ -21,10 +22,10 @@ Route::get('/', function () {
 // --- AUTHENTICATED ROUTES ---
 Route::middleware(['auth', 'verified'])->group(function () {
 
-    // 1. Dashboard (Dengan Middleware Pengecekan Akun)
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->middleware(EnsureTradingAccountSetup::class)->name('dashboard');
+    // 1. Dashboard 
+    Route::get('/dashboard', [DashboardController::class, 'index'])
+    ->middleware(EnsureTradingAccountSetup::class)
+    ->name('dashboard');
 
     // 2. Account Activity Log
     Route::get('/account-activity', [AccountTransactionController::class, 'index'])->name('account.activity');
