@@ -13,7 +13,7 @@ class TradingAccountController extends Controller
      */
     public function create()
     {
-        return Inertia::render('TradingAccount/Setup');
+        return Inertia::render('TradingAccount/Create');
     }
 
     /**

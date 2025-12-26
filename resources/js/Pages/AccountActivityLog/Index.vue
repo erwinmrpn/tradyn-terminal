@@ -27,7 +27,7 @@ const selectedRange = ref(props.filters.range || 'all');
 
 watch(selectedRange, (newRange) => {
     router.get(
-        route('account.activity'), 
+        route('Account Activity Log'), 
         { range: newRange }, 
         { preserveState: true, preserveScroll: true }
     );
