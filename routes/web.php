@@ -6,7 +6,9 @@ use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use App\Http\Controllers\AccountTransactionController;
 
+// --- PUBLIC ROUTES ---
 Route::get('/', function () {
     return Inertia::render('Welcome', [
         'canLogin' => Route::has('login'),
@@ -16,36 +18,29 @@ Route::get('/', function () {
     ]);
 });
 
-Route::get('/dashboard', function () {
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
-
-Route::middleware('auth')->group(function () {
-    // Route untuk Setup Akun Trading
-    Route::get('/setup-account', [TradingAccountController::class, 'create'])->name('trading-account.setup');
-    Route::post('/setup-account', [TradingAccountController::class, 'store'])->name('trading-account.store');
-});
-
-Route::middleware('auth')->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-});
-
-// GROUP KHUSUS UNTUK USER YANG SUDAH LOGIN
+// --- AUTHENTICATED ROUTES ---
 Route::middleware(['auth', 'verified'])->group(function () {
 
-    // 1. Route Dashboard (KITA PASANG PENJAGA DI SINI)
-    // Jika user belum setup, mereka tidak akan bisa masuk sini dan dilempar ke setup
+    // 1. Dashboard (Dengan Middleware Pengecekan Akun)
     Route::get('/dashboard', function () {
         return Inertia::render('Dashboard');
-    })->middleware(EnsureTradingAccountSetup::class)->name('dashboard'); // <--- Pasang Middleware di sini
+    })->middleware(EnsureTradingAccountSetup::class)->name('dashboard');
 
-    // 2. Route Setup Akun (JANGAN DIPASANG PENJAGA DI SINI, NANTI LOOPING)
+    // 2. Account Activity Log
+    Route::get('/account-activity', [AccountTransactionController::class, 'index'])->name('account.activity');
+    Route::post('/account-activity', [AccountTransactionController::class, 'store'])->name('account.activity.store');
+
+    // 3. MENU LAINNYA (Placeholder agar Sidebar tidak Error)
+    // Nanti Anda bisa ganti 'Dashboard' dengan 'Portfolio/Index', dll.
+    Route::get('/portfolio', function () { return Inertia::render('Dashboard'); })->name('portfolio');
+    Route::get('/research', function () { return Inertia::render('Dashboard'); })->name('research');
+    Route::get('/signal', function () { return Inertia::render('Dashboard'); })->name('signal');
+
+    // 4. Setup Akun Trading
     Route::get('/setup-account', [TradingAccountController::class, 'create'])->name('trading-account.setup');
     Route::post('/setup-account', [TradingAccountController::class, 'store'])->name('trading-account.store');
 
-    // 3. Route Profile
+    // 5. Profile
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
