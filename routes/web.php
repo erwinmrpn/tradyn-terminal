@@ -60,6 +60,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // 8. Trade Log
     Route::get('/trade-log', [TradeLogController::class, 'index'])->name('trade.log');
+    
+    // TAMBAHKAN BARIS INI AGAR ERROR ZIGGY HILANG:
+    Route::post('/trade-log', [TradeLogController::class, 'store'])->name('trade.log.store');
 });
 
 require __DIR__.'/auth.php';

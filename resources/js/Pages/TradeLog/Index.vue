@@ -24,6 +24,10 @@ watch(selectedAccount, (newAccount) => {
     router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
 });
 
+// --- SWAP LOGIC (ASSET vs BALANCE) ---
+const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); // Default input berdasarkan Asset (Quantity)
+const dynamicInput = ref(''); // Input mentah dari user
+
 // --- FORM INPUT LOGIC ---
 const form = useForm({
     trading_account_id: '',
@@ -32,23 +36,60 @@ const form = useForm({
     type: 'BUY',
     date: new Date().toISOString().split('T')[0],
     price: '',
-    quantity: '',
-    fee: '', // <--- Ganti Total dengan Fee (Input Manual)
+    quantity: '', // Akan diisi otomatis
+    total: '',    // Akan diisi otomatis
+    fee: '',
     notes: '',
     form_type: 'SPOT'
 });
 
+// Fungsi Switch Mode
+const toggleInputMode = () => {
+    dynamicInput.value = '';
+    form.quantity = '';
+    form.total = '';
+    inputMode.value = inputMode.value === 'ASSET' ? 'TOTAL' : 'ASSET';
+};
+
+// Kalkulator Otomatis (Real-time)
+watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) => {
+    const price = parseFloat(newPrice as string) || 0;
+    const inputVal = parseFloat(newVal as string) || 0;
+
+    if (price > 0 && inputVal > 0) {
+        if (mode === 'ASSET') {
+            form.quantity = inputVal.toString();
+            form.total = (price * inputVal).toFixed(8); 
+        } else {
+            form.total = inputVal.toString();
+            form.quantity = (inputVal / price).toFixed(8);
+        }
+    } else {
+        form.quantity = '';
+        form.total = '';
+    }
+});
+
 const submitTrade = () => {
-    if (!form.trading_account_id || !form.symbol || !form.price || !form.quantity) {
-        alert('Please fill in Account, Asset, Price, and Quantity');
-        return;
+    // Validasi Manual
+    if (!form.trading_account_id) { alert("Please select a trading account."); return; }
+    if (!form.symbol) { alert("Please enter an asset symbol."); return; }
+    if (!form.price) { alert("Price is required."); return; }
+    
+    if (!form.quantity || !form.total) { 
+        alert("Quantity or Total is invalid. Please check your input."); 
+        return; 
     }
 
     form.post(route('trade.log.store'), {
         onSuccess: () => {
-            // Reset form
-            form.reset('symbol', 'price', 'quantity', 'fee', 'notes');
+            form.reset('symbol', 'price', 'quantity', 'total', 'fee', 'notes');
+            dynamicInput.value = ''; 
             document.getElementById('input-symbol')?.focus();
+        },
+        onError: (errors) => {
+            console.error("Server Error:", errors);
+            alert("Failed to save trade. Check console for details.");
         },
         preserveScroll: true
     });
@@ -100,12 +141,12 @@ const formatCurrency = (value: number) => {
                         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
                             
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Date</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Date</label>
                                 <input v-model="form.date" type="date" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10">
                             </div>
 
                             <div class="lg:col-span-1">
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Account</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Account</label>
                                 <select v-model="form.trading_account_id" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10 appearance-none">
                                     <option value="" disabled>Select</option>
                                     <option v-for="acc in props.accounts.filter(a => a.strategy_type === 'SPOT')" :key="acc.id" :value="acc.id">{{ acc.name }}</option>
@@ -113,7 +154,7 @@ const formatCurrency = (value: number) => {
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Type</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Type</label>
                                 <select v-model="form.type" 
                                     class="w-full bg-[#1a1b20] border border-[#2d2f36] text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10 font-bold appearance-none text-center"
                                     :class="form.type === 'BUY' ? 'text-green-500' : 'text-red-500'"
@@ -124,12 +165,12 @@ const formatCurrency = (value: number) => {
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Asset</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Asset</label>
                                 <input id="input-symbol" v-model="form.symbol" type="text" placeholder="BTC" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none uppercase font-bold h-10">
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Mkt</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Mkt</label>
                                 <select v-model="form.market_type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10 appearance-none">
                                     <option value="CRYPTO">CRYPTO</option>
                                     <option value="STOCK">STOCK</option>
@@ -138,23 +179,51 @@ const formatCurrency = (value: number) => {
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Price</label>
-                                <input v-model="form.price" type="number" step="any" placeholder="0.00" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Price (USD)</label>
+                                <input v-model="form.price" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
+                            </div>
+
+                            <div class="relative group lg:col-span-1">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-[10px] text-gray-500 uppercase tracking-wider font-bold transition-all">
+                                        {{ inputMode === 'ASSET' ? 'Qty (Asset)' : 'Total (USD)' }}
+                                    </label>
+                                    <button 
+                                        type="button" 
+                                        @click="toggleInputMode" 
+                                        class="text-[9px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#2d2f36] bg-[#1a1b20] text-blue-400 hover:text-white hover:border-blue-500 transition-all" 
+                                        title="Switch input mode"
+                                    >
+                                        <span>SWAP</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                                    </button>
+                                </div>
+                                
+                                <input 
+                                    v-model="dynamicInput" 
+                                    type="number" 
+                                    step="any" 
+                                    :placeholder="inputMode === 'ASSET' ? '0.000000' : '100.00'" 
+                                    class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10 transition-all"
+                                    :class="inputMode === 'TOTAL' ? 'border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : ''"
+                                >
+                                
+                                <div v-if="form.price && dynamicInput" class="absolute -bottom-5 right-0 text-[10px] text-gray-500 font-mono whitespace-nowrap">
+                                    ≈ {{ inputMode === 'ASSET' 
+                                        ? formatCurrency(Number(form.total)) 
+                                        : Number(form.quantity).toFixed(6) + ' ' + (form.symbol || 'Asset') 
+                                    }}
+                                </div>
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Qty</label>
-                                <input v-model="form.quantity" type="number" step="any" placeholder="0.00" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
-                            </div>
-
-                            <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider font-bold">Fee</label>
-                                <input v-model="form.fee" type="number" step="any" placeholder="0.00" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-yellow-500 text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Fee</label>
+                                <input v-model="form.fee" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-yellow-500 text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
                             </div>
 
                         </div>
 
-                        <div class="mb-4">
+                        <div class="mb-4 mt-7">
                             <input 
                                 v-model="form.notes" 
                                 type="text" 
@@ -165,7 +234,8 @@ const formatCurrency = (value: number) => {
 
                         <div>
                             <button 
-                                type="submit" 
+                                type="button" 
+                                @click="submitTrade"
                                 :disabled="form.processing"
                                 class="w-full py-3 rounded-lg text-sm font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 tracking-wide uppercase"
                                 :class="form.type === 'BUY' 
@@ -196,7 +266,9 @@ const formatCurrency = (value: number) => {
                                     <template v-if="props.activeType === 'SPOT'">
                                         <th class="px-6 py-3 text-right">Price</th>
                                         <th class="px-6 py-3 text-right">Qty</th>
-                                        <th class="px-6 py-3 text-right">Fee</th> <th class="px-6 py-3">Notes</th>
+                                        <th class="px-6 py-3 text-right">Total</th>
+                                        <th class="px-6 py-3 text-right">Fee</th>
+                                        <th class="px-6 py-3">Notes</th>
                                     </template>
                                     <template v-else>
                                         <th class="px-6 py-3 text-right">Entry</th>
@@ -207,36 +279,24 @@ const formatCurrency = (value: number) => {
                             </thead>
                             <tbody class="divide-y divide-[#1f2128]">
                                 <tr v-for="trade in props.trades" :key="trade.id" class="hover:bg-[#1a1b20]/50 transition-colors group text-sm">
-                                    
                                     <td class="px-6 py-3 font-bold text-white">
                                         {{ trade.symbol }}
                                         <span class="text-[10px] text-gray-500 font-normal ml-1 bg-[#1f2128] px-1 rounded">{{ trade.trading_account.name }}</span>
                                     </td>
-                                    
-                                    <td class="px-6 py-3 text-gray-400 text-xs">
-                                        {{ props.activeType === 'SPOT' ? trade.date : trade.entry_date }}
-                                    </td>
-
+                                    <td class="px-6 py-3 text-gray-400 text-xs">{{ props.activeType === 'SPOT' ? trade.date : trade.entry_date }}</td>
                                     <td class="px-6 py-3">
                                         <span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border"
-                                            :class="['BUY', 'LONG'].includes(trade.type) 
-                                            ? 'text-green-400 bg-green-900/10 border-green-500/20' 
-                                            : 'text-red-400 bg-red-900/10 border-red-500/20'">
+                                            :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">
                                             {{ trade.type }}
                                         </span>
                                     </td>
-
                                     <template v-if="props.activeType === 'SPOT'">
                                         <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(trade.price) }}</td>
                                         <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ Number(trade.quantity) }}</td>
-                                        
-                                        <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
-                                            {{ formatCurrency(trade.fee || 0) }}
-                                        </td>
-                                        
+                                        <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.total || (trade.price * trade.quantity)) }}</td>
+                                        <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">{{ formatCurrency(trade.fee || 0) }}</td>
                                         <td class="px-6 py-3 text-gray-500 text-xs italic truncate max-w-[200px]">{{ trade.notes }}</td>
                                     </template>
-                                    
                                     <template v-else>
                                         <td class="px-6 py-3 text-right font-mono">{{ formatCurrency(trade.entry_price) }}</td>
                                         <td class="px-6 py-3 text-right font-bold">{{ formatCurrency(trade.pnl) }}</td>
@@ -244,7 +304,7 @@ const formatCurrency = (value: number) => {
                                     </template>
                                 </tr>
                                 <tr v-if="props.trades.length === 0">
-                                    <td colspan="7" class="px-6 py-12 text-center text-gray-500">No {{ props.activeType.toLowerCase() }} trades recorded yet.</td>
+                                    <td colspan="8" class="px-6 py-12 text-center text-gray-500">No {{ props.activeType.toLowerCase() }} trades recorded yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -255,3 +315,15 @@ const formatCurrency = (value: number) => {
         </main>
     </div>
 </template>
+
+<style scoped>
+/* Class KHUSUS yang lebih kuat untuk menghilangkan spinner */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.no-spinner {
+    -moz-appearance: textfield;
+}
+</style>

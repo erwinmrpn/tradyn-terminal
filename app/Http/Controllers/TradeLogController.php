@@ -57,14 +57,14 @@ class TradeLogController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+public function store(Request $request)
     {
         // Cek Form Type dulu
         $request->validate(['form_type' => 'required|in:SPOT,FUTURES']);
 
         if ($request->form_type === 'SPOT') {
             
-            // Validasi Input (Tambah Fee)
+            // 1. VALIDASI INPUT (Tambahkan 'total')
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
                 'symbol' => 'required|string|uppercase',
@@ -72,30 +72,37 @@ class TradeLogController extends Controller
                 'type' => 'required|in:BUY,SELL',
                 'price' => 'required|numeric|min:0',
                 'quantity' => 'required|numeric|min:0',
-                'fee' => 'nullable|numeric|min:0', // <--- Validasi Fee
+                
+                // --- TAMBAHAN WAJIB ---
+                'total' => 'required|numeric|min:0', // Data ini dikirim dari Frontend
+                // ----------------------
+
+                'fee' => 'nullable|numeric|min:0',
                 'date' => 'required|date',
                 'notes' => 'nullable|string',
             ]);
 
             $account = TradingAccount::find($validated['trading_account_id']);
             
-            // Hitung di memory saja untuk update saldo (tidak disimpan ke trade)
-            $calculatedTotal = $validated['price'] * $validated['quantity'];
+            // Kita gunakan 'total' dari inputan frontend karena sudah presisi dari kalkulasi swap
+            $tradeTotal = $validated['total']; 
             $fee = $validated['fee'] ?? 0;
 
             // Update Saldo Trading Account
             if ($validated['type'] === 'BUY') {
-                $deduction = $calculatedTotal + $fee;
+                $deduction = $tradeTotal + $fee;
+                
+                // Cek saldo cukup atau tidak
                 if ($account->balance < $deduction) {
                     return back()->withErrors(['balance' => 'Insufficient balance!']);
                 }
                 $account->decrement('balance', $deduction);
             } else {
-                $addition = $calculatedTotal - $fee;
+                $addition = $tradeTotal - $fee;
                 $account->increment('balance', $addition);
             }
 
-            // Simpan ke Tabel (TANPA TOTAL VALUE)
+            // 2. SIMPAN KE DATABASE (Masukkan 'total')
             SpotTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
                 'symbol' => $validated['symbol'],
@@ -103,14 +110,18 @@ class TradeLogController extends Controller
                 'type' => $validated['type'],
                 'price' => $validated['price'],
                 'quantity' => $validated['quantity'],
+                
+                // --- JANGAN LUPA INI ---
+                'total' => $validated['total'], // Kolom ini wajib ada di database
+                // -----------------------
+
                 'fee' => $fee,
                 'date' => $validated['date'],
                 'notes' => $validated['notes'],
-                // 'total_value' => ... (HAPUS BARIS INI)
             ]);
 
         } else {
-            // (Disini nanti tempat logika Simpan Futures)
+            // Logic Futures ...
         }
 
         return redirect()->back()->with('success', 'Trade recorded successfully.');

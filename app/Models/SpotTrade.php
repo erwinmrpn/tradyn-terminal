@@ -7,10 +7,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SpotTrade extends Model
 {
-    protected $fillable = [
-        'trading_account_id', 'symbol', 'market_type', 'type', 
-        'price', 'quantity', 'fee', 'date', 'notes' 
-    ];
+protected $fillable = [
+    'trading_account_id',
+    'symbol',
+    'market_type',
+    'type',
+    'price',
+    'quantity',
+    'total',     // <--- PASTIKAN INI ADA
+    'fee',       // <--- PASTIKAN INI ADA
+    'date',
+    'notes',
+];
 
     public function tradingAccount(): BelongsTo
     {
