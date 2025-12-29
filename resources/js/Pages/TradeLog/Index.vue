@@ -25,8 +25,8 @@ watch(selectedAccount, (newAccount) => {
 });
 
 // --- SWAP LOGIC (ASSET vs BALANCE) ---
-const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); // Default input berdasarkan Asset (Quantity)
-const dynamicInput = ref(''); // Input mentah dari user
+const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
+const dynamicInput = ref(''); 
 
 // --- FORM INPUT LOGIC ---
 const form = useForm({
@@ -36,8 +36,8 @@ const form = useForm({
     type: 'BUY',
     date: new Date().toISOString().split('T')[0],
     price: '',
-    quantity: '', // Akan diisi otomatis
-    total: '',    // Akan diisi otomatis
+    quantity: '', 
+    total: '',    
     fee: '',
     notes: '',
     form_type: 'SPOT'
@@ -71,7 +71,6 @@ watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) =>
 });
 
 const submitTrade = () => {
-    // Validasi Manual
     if (!form.trading_account_id) { alert("Please select a trading account."); return; }
     if (!form.symbol) { alert("Please enter an asset symbol."); return; }
     if (!form.price) { alert("Price is required."); return; }
@@ -138,8 +137,7 @@ const formatCurrency = (value: number) => {
                 <div v-if="props.activeType === 'SPOT'" class="bg-[#121317] border border-[#1f2128] rounded-xl p-5 shadow-lg">
                     <form @submit.prevent="submitTrade">
                         
-                        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
-                            
+                        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4 items-end"> 
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Date</label>
                                 <input v-model="form.date" type="date" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10">
@@ -170,32 +168,35 @@ const formatCurrency = (value: number) => {
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Mkt</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Market</label>
                                 <select v-model="form.market_type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10 appearance-none">
                                     <option value="CRYPTO">CRYPTO</option>
                                     <option value="STOCK">STOCK</option>
-                                    <option value="COMMODITY">COMM</option>
+                                    <option value="COMMODITY">COMMODITY</option>
                                 </select>
                             </div>
 
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Price (USD)</label>
+                                <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Asset Price (USD)</label>
                                 <input v-model="form.price" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10">
                             </div>
 
                             <div class="relative group lg:col-span-1">
-                                <div class="flex justify-between items-center mb-2">
-                                    <label class="text-[10px] text-gray-500 uppercase tracking-wider font-bold transition-all">
-                                        {{ inputMode === 'ASSET' ? 'Qty (Asset)' : 'Total (USD)' }}
+                                <div class="flex justify-between items-center mb-2"> 
+                                    <label class="block text-[10px] text-gray-500 uppercase tracking-wider font-bold transition-all">
+                                        {{ inputMode === 'ASSET' ? 'Quantity (Asset)' : 'Quantity (USD)' }}
                                     </label>
+                                    
                                     <button 
                                         type="button" 
                                         @click="toggleInputMode" 
-                                        class="text-[9px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded border border-[#2d2f36] bg-[#1a1b20] text-blue-400 hover:text-white hover:border-blue-500 transition-all" 
+                                        class="text-[9px] font-bold flex items-center gap-1 text-blue-400 hover:text-white transition-colors cursor-pointer" 
                                         title="Switch input mode"
                                     >
-                                        <span>SWAP</span>
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                                        SWAP
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                        </svg>
                                     </button>
                                 </div>
                                 
@@ -203,12 +204,12 @@ const formatCurrency = (value: number) => {
                                     v-model="dynamicInput" 
                                     type="number" 
                                     step="any" 
-                                    :placeholder="inputMode === 'ASSET' ? '0.000000' : '100.00'" 
+                                    :placeholder="inputMode === 'ASSET' ? '0.00' : '100.00'" 
                                     class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right focus:border-blue-500 outline-none font-mono h-10 transition-all"
-                                    :class="inputMode === 'TOTAL' ? 'border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : ''"
+                                    :class="inputMode === 'TOTAL' ? 'border-blue-500/50 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : ''"
                                 >
                                 
-                                <div v-if="form.price && dynamicInput" class="absolute -bottom-5 right-0 text-[10px] text-gray-500 font-mono whitespace-nowrap">
+                                <div v-if="form.price && dynamicInput" class="absolute -bottom-5 right-0 text-[9px] text-gray-600 font-mono whitespace-nowrap">
                                     ≈ {{ inputMode === 'ASSET' 
                                         ? formatCurrency(Number(form.total)) 
                                         : Number(form.quantity).toFixed(6) + ' ' + (form.symbol || 'Asset') 
@@ -227,7 +228,7 @@ const formatCurrency = (value: number) => {
                             <input 
                                 v-model="form.notes" 
                                 type="text" 
-                                placeholder="Add optional notes here..." 
+                                placeholder="What is your reason for buying/selling this asset?" 
                                 class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-sm rounded-lg p-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             >
                         </div>
@@ -243,7 +244,7 @@ const formatCurrency = (value: number) => {
                                     : 'bg-red-600 hover:bg-red-700 shadow-red-500/20'"
                             >
                                 <svg v-if="form.processing" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                <span v-else>Confirm {{ form.type }} Trade</span>
+                                <span v-else>Confirm {{ form.type }}</span>
                             </button>
                         </div>
                     </form>
@@ -265,7 +266,7 @@ const formatCurrency = (value: number) => {
                                     
                                     <template v-if="props.activeType === 'SPOT'">
                                         <th class="px-6 py-3 text-right">Price</th>
-                                        <th class="px-6 py-3 text-right">Qty</th>
+                                        <th class="px-6 py-3 text-right">Quantity</th>
                                         <th class="px-6 py-3 text-right">Total</th>
                                         <th class="px-6 py-3 text-right">Fee</th>
                                         <th class="px-6 py-3">Notes</th>
@@ -317,14 +318,14 @@ const formatCurrency = (value: number) => {
 </template>
 
 <style scoped>
-/* Class KHUSUS yang lebih kuat untuk menghilangkan spinner */
+/* Menghilangkan spinner & warning kuning */
 .no-spinner::-webkit-outer-spin-button,
 .no-spinner::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
 .no-spinner {
-    appearance: textfield;
+    appearance: textfield; 
     -moz-appearance: textfield;
 }
 </style>
