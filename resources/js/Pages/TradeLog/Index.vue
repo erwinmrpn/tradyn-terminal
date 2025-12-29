@@ -324,6 +324,7 @@ const formatCurrency = (value: number) => {
     margin: 0;
 }
 .no-spinner {
+    appearance: textfield;
     -moz-appearance: textfield;
 }
 </style>
