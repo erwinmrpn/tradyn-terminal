@@ -205,7 +205,7 @@ const formatCurrency = (value: number) => {
                             <div class="relative group lg:col-span-1">
                                 <div class="flex justify-between items-center mb-2"> 
                                     <label class="block text-[10px] text-gray-500 uppercase tracking-wider font-bold transition-all">
-                                        {{ inputMode === 'ASSET' ? 'Qty (Asset)' : 'Qty (USD)' }}
+                                        {{ inputMode === 'ASSET' ? 'Quantity (Asset)' : 'Quantity (USD)' }}
                                     </label>
                                     
                                     <button 
