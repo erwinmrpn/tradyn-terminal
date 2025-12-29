@@ -2,7 +2,7 @@
 import { Head, router, useForm } from '@inertiajs/vue3';
 import Sidebar from '@/Components/Sidebar.vue';
 import Navbar from '@/Components/Navbar.vue';
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 
 // --- PROPS ---
 const props = defineProps<{
@@ -13,7 +13,20 @@ const props = defineProps<{
     selectedAccountId: string;
 }>();
 
-// --- STATE & FILTER ---
+// --- SIDEBAR STATE MANAGEMENT (Tambahan Layout Fix) ---
+const isSidebarCollapsed = ref(false);
+
+onMounted(() => {
+    const saved = localStorage.getItem("sidebar_collapsed");
+    if (saved === "true") isSidebarCollapsed.value = true;
+});
+
+const toggleSidebar = () => {
+    isSidebarCollapsed.value = !isSidebarCollapsed.value;
+    localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
+}
+
+// --- LOGIC ASLI ANDA ---
 const selectedAccount = ref(props.selectedAccountId);
 
 const switchTab = (type: string) => {
@@ -102,14 +115,21 @@ const formatCurrency = (value: number) => {
 <template>
     <Head title="Trade Log" />
 
-    <div class="min-h-screen bg-[#0a0b0d] text-gray-300 font-sans flex">
-        <Sidebar />
+    <div class="min-h-screen bg-[#0a0b0d] text-gray-300 font-sans relative">
+        
+        <Sidebar 
+            :is-collapsed="isSidebarCollapsed" 
+            @toggle="toggleSidebar" 
+        />
 
-        <main class="flex-1 ml-[72px] lg:ml-64 flex flex-col min-h-screen">
+        <div 
+            class="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
+            :class="isSidebarCollapsed ? 'ml-[72px]' : 'ml-64'"
+        >
             <Navbar />
 
-            <div class="p-6 lg:p-8 space-y-8">
-
+            <main class="p-6 lg:p-8 space-y-8 flex-1">
+                
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1.5 rounded-full flex items-center w-full max-w-sm border border-[#2d2f36] relative shadow-inner">
                         <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
@@ -138,6 +158,7 @@ const formatCurrency = (value: number) => {
                     <form @submit.prevent="submitTrade">
                         
                         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4 items-end"> 
+                            
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">Date</label>
                                 <input v-model="form.date" type="date" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10">
@@ -184,7 +205,7 @@ const formatCurrency = (value: number) => {
                             <div class="relative group lg:col-span-1">
                                 <div class="flex justify-between items-center mb-2"> 
                                     <label class="block text-[10px] text-gray-500 uppercase tracking-wider font-bold transition-all">
-                                        {{ inputMode === 'ASSET' ? 'Quantity (Asset)' : 'Quantity (USD)' }}
+                                        {{ inputMode === 'ASSET' ? 'Qty (Asset)' : 'Qty (USD)' }}
                                     </label>
                                     
                                     <button 
@@ -228,7 +249,7 @@ const formatCurrency = (value: number) => {
                             <input 
                                 v-model="form.notes" 
                                 type="text" 
-                                placeholder="What is your reason for buying/selling this asset?" 
+                                placeholder="Add optional notes here..." 
                                 class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-sm rounded-lg p-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             >
                         </div>
@@ -244,7 +265,7 @@ const formatCurrency = (value: number) => {
                                     : 'bg-red-600 hover:bg-red-700 shadow-red-500/20'"
                             >
                                 <svg v-if="form.processing" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                <span v-else>Confirm {{ form.type }}</span>
+                                <span v-else>Confirm {{ form.type }} Trade</span>
                             </button>
                         </div>
                     </form>
@@ -312,8 +333,8 @@ const formatCurrency = (value: number) => {
                     </div>
                 </div>
 
-            </div>
-        </main>
+            </main>
+        </div>
     </div>
 </template>
 
