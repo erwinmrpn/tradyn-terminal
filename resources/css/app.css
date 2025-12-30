@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body {
+    background-color: #0a0b0d; /* Warna hitam yang sama dengan background aplikasi */
+    color: #e5e7eb; /* Text gray-200 (opsional, untuk default text) */
+    overscroll-behavior-y: none; /* Opsional: Mencegah efek bounce scroll di beberapa browser */
+}

@@ -2,6 +2,7 @@
 import { Head, router, useForm } from '@inertiajs/vue3';
 import Sidebar from '@/Components/Sidebar.vue';
 import Navbar from '@/Components/Navbar.vue';
+import Footer from '@/Components/Footer.vue';
 import { ref, watch, onMounted } from 'vue';
 
 // --- PROPS ---
@@ -41,7 +42,7 @@ watch(selectedAccount, (newAccount) => {
 const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
 const dynamicInput = ref(''); 
 
-// State Baru: Tab Internal Futures (OPEN / CLOSE / RESULT)
+// State Tab Internal Futures (OPEN / CLOSE / RESULT)
 const futuresTab = ref<'OPEN' | 'CLOSE' | 'RESULT'>('OPEN');
 
 // --- FORM INIT ---
@@ -64,7 +65,7 @@ const form = useForm({
     sl_price: '',
 });
 
-// Reset saat tab utama berubah
+// Reset saat tab utama berubah (Spot <-> Futures)
 watch(() => props.activeType, (newType) => {
     form.form_type = newType;
     form.type = newType === 'FUTURES' ? 'LONG' : 'BUY';
@@ -133,7 +134,7 @@ const formatCurrency = (value: number) => {
             
             <Navbar />
 
-            <main class="p-6 lg:p-8 space-y-8 flex-1">
+            <main class="p-6 lg:p-8 space-y-8 flex-1 pb-20">
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1.5 rounded-full flex items-center w-full max-w-sm border border-[#2d2f36] relative shadow-inner">
@@ -194,10 +195,10 @@ const formatCurrency = (value: number) => {
                 <div v-if="props.activeType === 'FUTURES'" class="bg-[#121317] border border-[#1f2128] rounded-xl p-6 shadow-lg">
                     
                     <div class="flex justify-center mb-8">
-                        <div class="bg-[#1a1b20] p-1.5 rounded-full grid grid-cols-3 items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
-                            <button @click="futuresTab = 'OPEN'" class="z-10 py-2 rounded-full text-sm font-bold transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
-                            <button @click="futuresTab = 'CLOSE'" class="z-10 py-2 rounded-full text-sm font-bold transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
-                            <button @click="futuresTab = 'RESULT'" class="z-10 py-2 rounded-full text-sm font-bold transition-colors" :class="futuresTab === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Result</button>
+                        <div class="bg-[#1a1b20] p-1.5 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
+                            <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
+                            <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
+                            <button @click="futuresTab = 'RESULT'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Result</button>
                             
                             <div class="absolute top-1.5 bottom-1.5 w-[calc(33.33%-4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]"
                                 :class="{
@@ -351,6 +352,8 @@ const formatCurrency = (value: number) => {
                 </div>
 
             </main>
+            
+            <Footer :is-sidebar-collapsed="isSidebarCollapsed" />
         </div>
     </div>
 </template>

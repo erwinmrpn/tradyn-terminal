@@ -73,7 +73,7 @@ const menuItems = [
             </template>
         </nav>
 
-        <div class="p-4 border-t border-[#1f2128] flex-shrink-0">
+        <div class="p-4 flex-shrink-0">
             <Link
                 :href="route('logout')"
                 method="post"
