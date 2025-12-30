@@ -12,19 +12,15 @@ defineProps<{
         :class="isSidebarCollapsed ? 'left-[72px]' : 'left-0 lg:left-64'"
     >
         <div class="hidden md:block truncate max-w-md font-medium tracking-wide">
-            We believe crypto is the technology of free people, free thinking, and free markets.
+            Consistency in journaling is the path to mastery. "Evolve or Die" -Ray Dalio
         </div>
 
         <div class="flex items-center gap-6 ml-auto whitespace-nowrap">
-            
-            <div class="flex items-center gap-1.5 hover:text-gray-300 cursor-pointer transition-colors">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]"></span>
-                <span class="uppercase font-bold tracking-wider">Status</span>
-            </div>
 
             <div class="hidden sm:flex items-center gap-5 uppercase font-bold tracking-wider">
-                <Link href="#" class="hover:text-white transition-colors">Terms</Link>
-                <Link href="#" class="hover:text-white transition-colors">About</Link>
+                <Link href="#" class="hover:text-white transition-colors">Latest Update</Link>
+                <Link href="#" class="hover:text-white transition-colors">Terms & Service</Link>
+                <Link href="#" class="hover:text-white transition-colors">About Us</Link>
                 <Link href="#" class="hover:text-white transition-colors">Plan</Link>
             </div>
 
