@@ -8,9 +8,11 @@ const user = computed(() => page.props.auth.user);
 </script>
 
 <template>
-    <nav class="sticky top-0 z-30 h-16 flex items-center justify-between px-6 lg:px-8 border-b border-[#1f2128] bg-[#0a0b0d] transition-colors duration-300">
+    <nav class="sticky top-0 z-30 h-16 flex items-center justify-between px-6 lg:px-8 bg-[#0a0b0d] transition-colors duration-300">
         
-        <div class="flex-1 max-w-xl">
+        <div class="flex-1 hidden md:block"></div>
+
+        <div class="w-full max-w-xl px-4 md:px-0">
             <div class="relative group">
                 <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <svg class="w-4 h-4 text-gray-500 group-focus-within:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -25,7 +27,7 @@ const user = computed(() => page.props.auth.user);
             </div>
         </div>
 
-        <div class="flex items-center gap-4 ml-4">
+        <div class="flex-1 flex justify-end items-center gap-4 ml-4">
             
             <button class="text-gray-400 hover:text-white transition relative p-1 rounded-md hover:bg-[#1a1b20]">
                 <div class="absolute top-1 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-[#0a0b0d]"></div>
