@@ -26,7 +26,7 @@ const menuItems = [
     >
         <div class="h-16 flex items-center justify-between px-4 relative flex-shrink-0">
             <div class="flex items-center space-x-3 overflow-hidden whitespace-nowrap w-full">
-                <img src="/images/logo.png" class="w-8 h-8 rounded object-contain flex-shrink-0" />
+                <img src="/images/logo_nobg.png" class="w-8 h-8 rounded object-contain flex-shrink-0" />
                 <span 
                     class="font-bold text-gray-100 text-lg tracking-wide transition-opacity duration-200"
                     :class="props.isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100 w-auto block'"
