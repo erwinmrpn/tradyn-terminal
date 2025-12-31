@@ -8,7 +8,7 @@ import imageCompression from 'browser-image-compression';
 
 import SpotForm from './Partials/SpotForm.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
-import FuturesClose from './Partials/FuturesClose.vue'; // Pastikan diimport
+import FuturesClose from './Partials/FuturesClose.vue';
 
 const props = defineProps<{
     trades: any[];
@@ -18,11 +18,14 @@ const props = defineProps<{
     selectedAccountId: string;
 }>();
 
+// --- LOGIKA FILTER AKUN ---
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
-    return props.accounts.filter(acc => acc.strategy_type === props.activeType);
+    let filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
+    return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
+// --- SMART DEFAULT ---
 const applySmartDefaults = () => {
     if (filteredAccounts.value.length > 0) {
         const firstAccountID = filteredAccounts.value[0].id;
@@ -57,8 +60,8 @@ watch(selectedAccount, (newAccount) => {
     }
 });
 watch(() => props.activeType, () => {
-    form.form_type = props.activeType;
-    form.type = props.activeType === 'FUTURES' ? 'LONG' : 'BUY';
+    form.form_type = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
+    form.type = (props.activeType === 'FUTURES' || props.activeType === 'RESULT') ? 'LONG' : 'BUY';
     futuresTab.value = 'OPEN';
     form.errors = {};
     nextTick(() => { applySmartDefaults(); });
@@ -67,7 +70,7 @@ watch(() => props.activeType, () => {
 const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
 const dynamicInput = ref(''); 
 const isCompressing = ref(false);
-const futuresTab = ref<'OPEN' | 'CLOSE' | 'RESULT'>('OPEN');
+const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
 
 const form = useForm({
     trading_account_id: '',
@@ -174,16 +177,27 @@ const formatCurrency = (value: number) => {
             <main class="p-6 lg:p-8 space-y-8 flex-1 pb-20">
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
-                    <div class="bg-[#1a1b20] p-1.5 rounded-full flex items-center w-full max-w-sm border border-[#2d2f36] relative shadow-inner">
-                        <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
-                        <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
-                        <div class="absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] bg-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(16,185,129,0.4)]" :class="props.activeType === 'SPOT' ? 'left-1.5' : 'left-[calc(50%+3px)]'"></div>
+                    <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-lg border border-[#2d2f36] relative shadow-inner">
+                        
+                        <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] bg-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(16,185,129,0.4)] z-0" 
+                            :class="{
+                                'left-1': props.activeType === 'SPOT',
+                                'left-[calc(33.33%_+_2px)]': props.activeType === 'FUTURES',
+                                'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'
+                            }">
+                        </div>
+
+                        <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
+                        <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
+                        <button @click="switchTab('RESULT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">RESULT</button>
                     </div>
                 </div>
 
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
-                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total {{ props.activeType }} Balance</div>
+                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
+                            Total {{ props.activeType === 'RESULT' ? 'FUTURES' : props.activeType }} Balance
+                        </div>
                         <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(props.totalBalance) }}</div>
                     </div>
                     <div class="relative w-full sm:w-64">
@@ -200,22 +214,40 @@ const formatCurrency = (value: number) => {
                 <SpotForm v-if="props.activeType === 'SPOT'" :accounts="filteredAccounts" />
 
                 <div v-if="props.activeType === 'FUTURES'">
+                    
                     <div class="flex justify-center mb-8">
-                        <div class="bg-[#1a1b20] p-1.5 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
-                            <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
-                            <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
-                            <button @click="futuresTab = 'RESULT'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Result</button>
-                            <div class="absolute top-1.5 bottom-1.5 w-[calc(33.33%-4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]" :class="{'left-1.5': futuresTab === 'OPEN', 'left-[calc(33.33%+2px)]': futuresTab === 'CLOSE', 'left-[calc(66.66%+2px)]': futuresTab === 'RESULT'}"></div>
+                        <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
+                            
+                            <div class="absolute top-1 bottom-1 w-[calc(50%_-_4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)] z-0" 
+                                :class="{
+                                    'left-1': futuresTab === 'OPEN',
+                                    'left-[calc(50%_+_2px)]': futuresTab === 'CLOSE'
+                                }">
+                            </div>
+
+                            <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" 
+                                :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">
+                                Open Position
+                            </button>
+                            <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" 
+                                :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">
+                                Close Position
+                            </button>
                         </div>
                     </div>
 
                     <FuturesOpen v-if="futuresTab === 'OPEN'" :accounts="filteredAccounts" />
                     <FuturesClose v-else-if="futuresTab === 'CLOSE'" :trades="props.trades" />
-                    
-                    <div v-else-if="futuresTab === 'RESULT'" class="text-center py-12 text-gray-500"><i class="fas fa-chart-line text-2xl mb-2"></i><p>Reflection & Result Module Coming Soon</p></div>
                 </div>
 
-                <div v-if="!(props.activeType === 'FUTURES' && futuresTab === 'CLOSE')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
+                <div v-if="props.activeType === 'RESULT'" class="text-center py-20 bg-[#121317] border border-[#1f2128] rounded-xl">
+                    <i class="fas fa-chart-line text-4xl text-gray-600 mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-400">Trade Results</h3>
+                    <p class="text-sm text-gray-600 mt-2">Comprehensive history and performance analysis coming soon.</p>
+                    <p class="text-xs text-gray-700 mt-1">Data is already filtered for closed positions in the backend.</p>
+                </div>
+
+                <div v-if="props.activeType === 'SPOT' || (props.activeType === 'FUTURES' && futuresTab === 'OPEN')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
                     <div class="p-4 border-b border-[#1f2128] bg-[#1a1b20]/50 flex justify-between items-center">
                         <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">History Log</h3>
                         <span class="text-[10px] text-gray-600">Recent activity</span>
@@ -262,7 +294,7 @@ const formatCurrency = (value: number) => {
                                     </template>
                                     <td class="px-6 py-3 text-gray-500 text-xs italic truncate max-w-[150px]">{{ trade.notes }}</td>
                                 </tr>
-                                <tr v-if="props.trades.length === 0"><td colspan="8" class="px-6 py-12 text-center text-gray-500">No {{ props.activeType.toLowerCase() }} trades recorded yet.</td></tr>
+                                <tr v-if="props.trades.length === 0"><td colspan="8" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
                             </tbody>
                         </table>
                     </div>

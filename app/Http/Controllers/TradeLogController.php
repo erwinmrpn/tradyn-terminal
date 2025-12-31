@@ -11,37 +11,58 @@ use App\Models\FuturesTrade;
 
 class TradeLogController extends Controller
 {
+    /**
+     * Menampilkan Halaman Trade Log (Spot, Futures, Result)
+     */
     public function index(Request $request)
     {
-        $type = $request->input('type', 'SPOT');
+        // Ambil parameter type dari URL, default 'SPOT'
+        $type = $request->input('type', 'SPOT'); 
         $accountId = $request->input('account_id', 'all');
         $user = Auth::user();
 
-        // Query Data
+        // --- 1. LOGIKA QUERY DATA BERDASARKAN TAB ---
         if ($type === 'FUTURES') {
-            $query = FuturesTrade::query();
-        } else {
+            // Tab FUTURES utama: Fokus pada posisi yang masih AKTIF (OPEN)
+            // Karena user akan melakukan Open Position atau Close Position di sini.
+            $query = FuturesTrade::query()->where('status', 'OPEN');
+        } 
+        elseif ($type === 'RESULT') {
+            // Tab RESULT utama: Fokus pada history Futures yang sudah SELESAI (CLOSED)
+            $query = FuturesTrade::query()->where('status', 'CLOSED');
+        } 
+        else {
+            // Tab SPOT: Tampilkan semua history spot
             $query = SpotTrade::query();
         }
 
-        // Filter Akun
+        // --- 2. FILTER AKUN (Jika user memilih akun tertentu) ---
         if ($accountId !== 'all') {
             $query->where('trading_account_id', $accountId);
         } else {
+            // Jika 'all', pastikan hanya mengambil data milik user yang login
             $query->whereHas('tradingAccount', function ($q) use ($user) {
                 $q->where('user_id', $user->id);
             });
         }
 
-        // Ambil data terbaru
+        // --- 3. SORTING DATA ---
+        // Spot: berdasarkan tanggal transaksi
+        // Futures/Result: berdasarkan entry date atau exit date
+        $sortField = ($type === 'SPOT') ? 'date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
+        
         $trades = $query->with('tradingAccount')
-            ->latest($type === 'SPOT' ? 'date' : 'entry_date')
+            ->latest($sortField)
             ->get();
             
         $accounts = $user->tradingAccounts;
 
+        // --- 4. HITUNG TOTAL BALANCE ---
+        // Jika sedang di tab RESULT, kita tampilkan saldo FUTURES
+        $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
+        
         $totalBalance = $user->tradingAccounts()
-            ->where('strategy_type', $type)
+            ->where('strategy_type', $balanceType)
             ->sum('balance');
 
         return Inertia::render('TradeLog/Index', [
@@ -53,6 +74,9 @@ class TradeLogController extends Controller
         ]);
     }
 
+    /**
+     * Menyimpan Transaksi Baru (Spot Trade & Futures Open Position)
+     */
     public function store(Request $request)
     {
         // 1. Validasi Tipe Form
@@ -63,7 +87,7 @@ class TradeLogController extends Controller
 
         if ($request->hasFile('screenshot')) {
             $request->validate([
-                'screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120'
+                'screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120' // Max 5MB
             ]);
             // Simpan ke folder 'public/screenshots'
             $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
@@ -83,21 +107,22 @@ class TradeLogController extends Controller
                 'order_type' => 'required|string',
                 'price' => 'required|numeric|min:0', 
                 'quantity' => 'required|numeric|min:0', 
-                'total' => 'required|numeric|min:0', 
+                'total' => 'required|numeric|min:0', // Ini adalah Margin Cost
                 'tp_price' => 'nullable|numeric',
                 'sl_price' => 'nullable|numeric',
                 'notes' => 'nullable|string',
             ]);
 
-            // Cek Saldo
+            // Cek Saldo Akun Futures
             $account = TradingAccount::find($validated['trading_account_id']);
             if ($account->balance < $validated['total']) {
                  return back()->withErrors(['balance' => 'Insufficient futures balance!']);
             }
-            // Kurangi saldo saat Open Position
+            
+            // Kurangi saldo saat Open Position (Margin digunakan)
             $account->decrement('balance', $validated['total']);
 
-            // Simpan ke Database
+            // Simpan ke Database Futures
             FuturesTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
                 'entry_date' => $validated['date'],
@@ -120,7 +145,7 @@ class TradeLogController extends Controller
             return redirect()->back()->with('success', 'Futures position opened!');
         } 
         
-        // === LOGIKA SPOT ===
+        // === LOGIKA SPOT TRADE ===
         else {
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
@@ -139,6 +164,7 @@ class TradeLogController extends Controller
             $tradeTotal = $validated['total']; 
             $fee = $validated['fee'] ?? 0;
 
+            // Update Saldo Spot
             if ($validated['type'] === 'BUY') {
                 $deduction = $tradeTotal + $fee;
                 if ($account->balance < $deduction) {
@@ -150,6 +176,7 @@ class TradeLogController extends Controller
                 $account->increment('balance', $addition);
             }
 
+            // Simpan ke Database Spot
             SpotTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
                 'symbol' => $validated['symbol'],
@@ -159,6 +186,7 @@ class TradeLogController extends Controller
                 'quantity' => $validated['quantity'],
                 'total' => $validated['total'],
                 'fee' => $fee,
+                // Spot tidak menyimpan screenshot
                 'date' => $validated['date'],
                 'notes' => $validated['notes'],
             ]);
@@ -168,14 +196,14 @@ class TradeLogController extends Controller
     }
 
     /**
-     * [BARU] Menangani Close Position Futures
+     * Menyimpan Close Position Futures (Menghitung PnL & Fee Akhir)
      */
     public function closePosition(Request $request, $id)
     {
         // Cari trade berdasarkan ID
         $trade = FuturesTrade::findOrFail($id);
         
-        // Pastikan trade ini milik salah satu akun user yang login (Security Check)
+        // Security Check: Pastikan trade milik user yang login
         if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) {
             abort(403, 'Unauthorized action.');
         }
@@ -221,7 +249,7 @@ class TradeLogController extends Controller
             'status' => 'CLOSED',
             'exit_date' => $validated['exit_date'],
             'exit_price' => $validated['exit_price'],
-            'fee' => $validated['fee'],
+            'fee' => $validated['fee'], // Fee final disimpan di sini
             'pnl' => $netPnL,
             'exit_reason' => $validated['exit_reason'],
             'notes' => $trade->notes . ($validated['notes'] ? "\n[Close]: " . $validated['notes'] : ""),
