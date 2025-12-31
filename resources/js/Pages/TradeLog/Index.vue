@@ -5,6 +5,9 @@ import Navbar from '@/Components/Navbar.vue';
 import Footer from '@/Components/Footer.vue';
 import { ref, watch, onMounted } from 'vue';
 
+// --- IMPORT LIBRARY KOMPRESI ---
+import imageCompression from 'browser-image-compression';
+
 // --- PROPS ---
 const props = defineProps<{
     trades: any[];
@@ -38,11 +41,12 @@ watch(selectedAccount, (newAccount) => {
     router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
 });
 
-// State Swap Input (Margin vs Qty)
+// State Swap Input
 const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
 const dynamicInput = ref(''); 
+const isCompressing = ref(false); // Indikator Loading Kompresi
 
-// State Tab Internal Futures (OPEN / CLOSE / RESULT)
+// State Tab Futures
 const futuresTab = ref<'OPEN' | 'CLOSE' | 'RESULT'>('OPEN');
 
 // --- FORM INIT ---
@@ -54,7 +58,7 @@ const form = useForm({
     price: '',
     quantity: '', 
     total: '',    
-    fee: '', // Hanya untuk SPOT
+    fee: '', // Spot Only
     notes: '',
     type: 'BUY', 
     form_type: props.activeType, 
@@ -63,16 +67,15 @@ const form = useForm({
     order_type: 'MARKET',
     tp_price: '',
     sl_price: '',
-    screenshot: null as File | null, // Hanya untuk FUTURES
+    screenshot: null as File | null, // Futures Only
 });
 
-// Reset saat tab utama berubah (Spot <-> Futures)
+// Reset saat tab berubah
 watch(() => props.activeType, (newType) => {
     form.form_type = newType;
-    // Set default type: Futures = LONG, Spot = BUY
     form.type = newType === 'FUTURES' ? 'LONG' : 'BUY';
-    futuresTab.value = 'OPEN'; // Reset ke Open Position saat pindah ke Futures
-    form.errors = {}; // Clear errors
+    futuresTab.value = 'OPEN'; 
+    form.errors = {}; 
 });
 
 const toggleInputMode = () => {
@@ -101,11 +104,39 @@ watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) =>
     }
 });
 
-// Handle File Input Change (Futures Only)
-const handleFileChange = (event: Event) => {
+// --- [FITUR BARU] HANDLE FILE CHANGE + AUTO COMPRESS ---
+const handleFileChange = async (event: Event) => {
     const target = event.target as HTMLInputElement;
-    if (target.files && target.files[0]) {
-        form.screenshot = target.files[0];
+    const file = target.files ? target.files[0] : null;
+
+    if (file) {
+        console.log(`Original Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+
+        // Opsi Kompresi
+        const options = {
+            maxSizeMB: 0.8,          // Kompres jadi di bawah 0.8 MB
+            maxWidthOrHeight: 1920,  // Resize jika resolusi terlalu besar
+            useWebWorker: true,      // Biar browser gak nge-lag
+        };
+
+        try {
+            isCompressing.value = true; // Nyalakan loading
+            
+            // Proses Kompresi
+            const compressedFile = await imageCompression(file, options);
+            
+            console.log(`Compressed Size: ${(compressedFile.size / 1024 / 1024).toFixed(2)} MB`);
+
+            // Ubah Blob kembali jadi File object agar Inertia mau membacanya
+            const newFile = new File([compressedFile], file.name, { type: file.type });
+
+            form.screenshot = newFile;
+        } catch (error) {
+            console.error("Compression Error:", error);
+            alert("Gagal mengompres gambar. Silakan coba gambar lain.");
+        } finally {
+            isCompressing.value = false; // Matikan loading
+        }
     }
 };
 
@@ -113,23 +144,20 @@ const submitTrade = () => {
     if (!form.trading_account_id) { alert("Please select a trading account."); return; }
     if (!form.symbol) { alert("Please enter an asset symbol."); return; }
     if (!form.price) { alert("Price is required."); return; }
+    if (isCompressing.value) { alert("Please wait, compressing image..."); return; } // Cegah submit saat kompres
     
-    // Inertia otomatis handle FormData untuk upload file
     form.post(route('trade.log.store'), {
+        forceFormData: true, // Wajib agar file terkirim
         onSuccess: () => {
-            // Reset form
             form.reset('symbol', 'price', 'quantity', 'total', 'fee', 'notes', 'tp_price', 'sl_price', 'screenshot');
             dynamicInput.value = ''; 
-            
-            // Reset input file visual secara manual
             const fileInput = document.getElementById('file-upload-futures') as HTMLInputElement;
             if(fileInput) fileInput.value = '';
-            
             document.getElementById('input-symbol')?.focus();
         },
         onError: (errors) => {
             console.error("Server Error:", errors);
-            alert("Failed to save trade. Check console for details.");
+            alert("Failed to save trade.");
         },
         preserveScroll: true
     });
@@ -144,7 +172,6 @@ const formatCurrency = (value: number) => {
     <Head title="Trade Log" />
 
     <div class="min-h-screen bg-[#0a0b0d] text-gray-300 font-sans relative">
-        
         <Sidebar :is-collapsed="isSidebarCollapsed" @toggle="toggleSidebar" />
 
         <div class="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
@@ -181,23 +208,17 @@ const formatCurrency = (value: number) => {
                 <div v-if="props.activeType === 'SPOT'" class="bg-[#121317] border border-[#1f2128] rounded-xl p-5 shadow-lg">
                     <form @submit.prevent="submitTrade">
                         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4 items-end"> 
-                            
                             <div><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Date</label><input v-model="form.date" type="date" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none h-10"></div>
                             <div class="lg:col-span-1"><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Account</label><select v-model="form.trading_account_id" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 h-10"><option value="" disabled>Select</option><option v-for="acc in props.accounts" :key="acc.id" :value="acc.id">{{ acc.name }}</option></select></div>
-                            
                             <div><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Type</label><select v-model="form.type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-xs rounded p-2.5 h-10 font-bold text-center" :class="form.type === 'BUY' ? 'text-green-500' : 'text-red-500'"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></div>
-                            
                             <div><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Asset</label><input id="input-symbol" v-model="form.symbol" type="text" placeholder="BTC" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 h-10 uppercase font-bold"></div>
                             <div><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Market</label><select v-model="form.market_type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-xs rounded p-2.5 h-10"><option value="CRYPTO">CRYPTO</option><option value="STOCK">STOCK</option></select></div>
-                            
                             <div><label class="block text-[10px] text-gray-500 mb-2 font-bold uppercase">Price</label><input v-model="form.price" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right font-mono h-10"></div>
                             
                             <div class="relative group lg:col-span-1">
                                 <div class="flex justify-between items-center mb-2">
                                     <label class="block text-[10px] text-gray-500 font-bold uppercase">{{ inputMode === 'ASSET' ? 'Qty' : 'Total' }}</label>
-                                    <button type="button" @click="toggleInputMode" class="text-[9px] font-bold text-blue-500 hover:text-blue-400 flex items-center gap-1 uppercase transition-all">
-                                        SWAP <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                                    </button>
+                                    <button type="button" @click="toggleInputMode" class="text-[9px] font-bold text-blue-500 hover:text-blue-400 flex items-center gap-1 uppercase transition-all">SWAP <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg></button>
                                 </div>
                                 <input v-model="dynamicInput" type="number" step="any" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-2.5 text-right font-mono h-10">
                                 <div v-if="form.price && dynamicInput" class="absolute -bottom-5 right-0 text-[9px] text-gray-500">≈ {{ inputMode === 'ASSET' ? formatCurrency(Number(form.total)) : Number(form.quantity).toFixed(6) }}</div>
@@ -209,16 +230,7 @@ const formatCurrency = (value: number) => {
                         <div class="mb-4 mt-7"><input v-model="form.notes" type="text" placeholder="Notes..." class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-sm rounded-lg p-3"></div>
                         
                         <div>
-                            <button 
-                                type="submit" 
-                                :disabled="form.processing"
-                                class="w-full py-3 rounded-lg text-sm font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-wide"
-                                :class="form.type === 'BUY' 
-                                    ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' 
-                                    : 'bg-red-600 hover:bg-red-700 shadow-red-500/20'"
-                            >
-                                CONFIRM {{ form.type }} TRADE
-                            </button>
+                            <button type="submit" :disabled="form.processing" class="w-full py-3 rounded-lg text-sm font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-wide" :class="form.type === 'BUY' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' : 'bg-red-600 hover:bg-red-700 shadow-red-500/20'">CONFIRM {{ form.type }} TRADE</button>
                         </div>
                     </form>
                 </div>
@@ -230,18 +242,11 @@ const formatCurrency = (value: number) => {
                             <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
                             <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
                             <button @click="futuresTab = 'RESULT'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Result</button>
-                            <div class="absolute top-1.5 bottom-1.5 w-[calc(33.33%-4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]"
-                                :class="{
-                                    'left-1.5': futuresTab === 'OPEN',
-                                    'left-[calc(33.33%+2px)]': futuresTab === 'CLOSE',
-                                    'left-[calc(66.66%+2px)]': futuresTab === 'RESULT'
-                                }"
-                            ></div>
+                            <div class="absolute top-1.5 bottom-1.5 w-[calc(33.33%-4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]" :class="{'left-1.5': futuresTab === 'OPEN', 'left-[calc(33.33%+2px)]': futuresTab === 'CLOSE', 'left-[calc(66.66%+2px)]': futuresTab === 'RESULT'}"></div>
                         </div>
                     </div>
 
                     <form v-if="futuresTab === 'OPEN'" @submit.prevent="submitTrade">
-                        
                         <div class="grid grid-cols-2 gap-4 mb-5">
                             <div><label class="block text-[10px] text-gray-500 mb-1 font-bold tracking-wider uppercase">Date</label><input v-model="form.date" type="date" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded p-3 focus:border-blue-500 outline-none"></div>
                             <div>
@@ -293,19 +298,11 @@ const formatCurrency = (value: number) => {
                         </div>
 
                         <div class="grid grid-cols-2 gap-4 mb-5">
-                            <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Entry Price ($)</label>
-                                <input v-model="form.price" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded p-3 text-right font-mono focus:border-blue-500 outline-none">
-                            </div>
-                            
+                            <div><label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Entry Price ($)</label><input v-model="form.price" type="number" step="any" placeholder="0.00" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded p-3 text-right font-mono focus:border-blue-500 outline-none"></div>
                             <div class="relative group">
                                 <div class="flex justify-between items-center mb-1">
-                                    <label class="text-[10px] text-gray-500 font-bold transition-all text-blue-400 uppercase">
-                                        {{ inputMode === 'ASSET' ? 'SIZE (Coins)' : 'MARGIN (Cost)' }}
-                                    </label>
-                                    <button type="button" @click="toggleInputMode" class="text-[9px] font-bold text-blue-500 hover:text-blue-400 flex items-center gap-1 uppercase transition-all">
-                                        SWAP <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                                    </button>
+                                    <label class="text-[10px] text-gray-500 font-bold transition-all text-blue-400 uppercase">{{ inputMode === 'ASSET' ? 'SIZE (Coins)' : 'MARGIN (Cost)' }}</label>
+                                    <button type="button" @click="toggleInputMode" class="text-[9px] font-bold text-blue-500 hover:text-blue-400 flex items-center gap-1 uppercase transition-all">SWAP <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg></button>
                                 </div>
                                 <input v-model="dynamicInput" type="number" step="any" class="no-spinner w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded p-3 text-right font-mono focus:border-blue-500 outline-none">
                                 <div v-if="form.price && dynamicInput" class="absolute -bottom-5 right-0 text-[10px] text-gray-500 font-mono">
@@ -324,9 +321,13 @@ const formatCurrency = (value: number) => {
                             
                             <div class="col-span-1 relative group">
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Chart</label>
-                                <label for="file-upload-futures" class="flex items-center justify-center w-full h-[42px] bg-[#1a1b20] border border-[#2d2f36] rounded cursor-pointer hover:border-gray-500 transition-colors text-gray-400 text-xs">
-                                    <span v-if="!form.screenshot" class="flex items-center gap-1"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg> Upload</span>
-                                    <span v-else class="truncate px-2 text-blue-400">{{ form.screenshot.name }}</span>
+                                <label for="file-upload-futures" class="flex items-center justify-center w-full h-[42px] bg-[#1a1b20] border border-[#2d2f36] rounded cursor-pointer hover:border-gray-500 transition-colors text-gray-400 text-xs overflow-hidden">
+                                    
+                                    <span v-if="isCompressing" class="text-yellow-500 animate-pulse font-bold">Compressing...</span>
+                                    
+                                    <span v-else-if="form.screenshot" class="truncate px-2 text-blue-400">{{ form.screenshot.name }}</span>
+                                    
+                                    <span v-else class="flex items-center gap-1"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg> Upload</span>
                                 </label>
                                 <input id="file-upload-futures" type="file" @change="handleFileChange" accept="image/*" class="hidden">
                             </div>
@@ -334,27 +335,11 @@ const formatCurrency = (value: number) => {
                             <div class="col-span-3"><label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Notes</label><input v-model="form.notes" type="text" placeholder="Setup reasoning..." class="w-full bg-[#1a1b20] border border-[#2d2f36] text-gray-300 text-xs rounded p-2.5 focus:border-blue-500 outline-none h-[42px]"></div>
                         </div>
 
-                        <button 
-                            type="submit" 
-                            :disabled="form.processing"
-                            class="w-full py-4 rounded-lg text-sm font-black text-white shadow-xl transition-all tracking-widest uppercase border border-transparent hover:border-white/20"
-                            :class="form.type === 'LONG' 
-                                ? 'bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 shadow-[0_0_20px_rgba(22,163,74,0.3)]' 
-                                : 'bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 shadow-[0_0_20px_rgba(220,38,38,0.3)]'"
-                        >
-                            OPEN {{ form.type }} POSITION
-                        </button>
+                        <button type="submit" :disabled="form.processing || isCompressing" class="w-full py-4 rounded-lg text-sm font-black text-white shadow-xl transition-all tracking-widest uppercase border border-transparent hover:border-white/20 disabled:opacity-50 disabled:cursor-not-allowed" :class="form.type === 'LONG' ? 'bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 shadow-[0_0_20px_rgba(22,163,74,0.3)]' : 'bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 shadow-[0_0_20px_rgba(220,38,38,0.3)]'">OPEN {{ form.type }} POSITION</button>
                     </form>
 
-                    <div v-else-if="futuresTab === 'CLOSE'" class="text-center py-12 text-gray-500">
-                        <i class="fas fa-lock text-2xl mb-2"></i>
-                        <p>Close Position Module Coming Soon</p>
-                    </div>
-
-                    <div v-else-if="futuresTab === 'RESULT'" class="text-center py-12 text-gray-500">
-                        <i class="fas fa-chart-line text-2xl mb-2"></i>
-                        <p>Reflection & Result Module Coming Soon</p>
-                    </div>
+                    <div v-else-if="futuresTab === 'CLOSE'" class="text-center py-12 text-gray-500"><i class="fas fa-lock text-2xl mb-2"></i><p>Close Position Module Coming Soon</p></div>
+                    <div v-else-if="futuresTab === 'RESULT'" class="text-center py-12 text-gray-500"><i class="fas fa-chart-line text-2xl mb-2"></i><p>Reflection & Result Module Coming Soon</p></div>
                 </div>
 
                 <div class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
@@ -371,15 +356,8 @@ const formatCurrency = (value: number) => {
                                     <th class="px-6 py-3">Type</th>
                                     <th class="px-6 py-3 text-right">Price</th>
                                     <th class="px-6 py-3 text-right">Size/Qty</th>
-                                    <template v-if="props.activeType === 'SPOT'">
-                                        <th class="px-6 py-3 text-right">Total</th>
-                                        <th class="px-6 py-3 text-right">Fee</th>
-                                    </template>
-                                    <template v-else>
-                                        <th class="px-6 py-3 text-right">Margin</th>
-                                        <th class="px-6 py-3 text-center">Lev</th>
-                                        <th class="px-6 py-3 text-right">Chart</th>
-                                    </template>
+                                    <template v-if="props.activeType === 'SPOT'"><th class="px-6 py-3 text-right">Total</th><th class="px-6 py-3 text-right">Fee</th></template>
+                                    <template v-else><th class="px-6 py-3 text-right">Margin</th><th class="px-6 py-3 text-center">Lev</th><th class="px-6 py-3 text-right">Chart</th></template>
                                     <th class="px-6 py-3">Notes</th>
                                 </tr>
                             </thead>
@@ -390,7 +368,6 @@ const formatCurrency = (value: number) => {
                                     <td class="px-6 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span></td>
                                     <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(props.activeType === 'SPOT' ? trade.price : trade.entry_price) }}</td>
                                     <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ Number(trade.quantity) }}</td>
-                                    
                                     <template v-if="props.activeType === 'SPOT'">
                                         <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.total) }}</td>
                                         <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">{{ formatCurrency(trade.fee) }}</td>
@@ -403,7 +380,6 @@ const formatCurrency = (value: number) => {
                                             <span v-else class="text-gray-600">-</span>
                                         </td>
                                     </template>
-
                                     <td class="px-6 py-3 text-gray-500 text-xs italic truncate max-w-[150px]">{{ trade.notes }}</td>
                                 </tr>
                                 <tr v-if="props.trades.length === 0"><td colspan="8" class="px-6 py-12 text-center text-gray-500">No {{ props.activeType.toLowerCase() }} trades recorded yet.</td></tr>
@@ -413,14 +389,12 @@ const formatCurrency = (value: number) => {
                 </div>
 
             </main>
-            
             <Footer :is-sidebar-collapsed="isSidebarCollapsed" />
         </div>
     </div>
 </template>
 
 <style scoped>
-.no-spinner::-webkit-outer-spin-button,
-.no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spinner::-webkit-outer-spin-button, .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { appearance: textfield; -moz-appearance: textfield; }
 </style>

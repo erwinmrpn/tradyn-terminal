@@ -10,11 +10,11 @@ class FuturesTrade extends Model
 {
     use HasFactory;
 
-    // Kita gunakan $fillable agar sama persis formatnya dengan SpotTrade
     protected $fillable = [
         'trading_account_id',
         'symbol',
         'market_type',
+        'entry_date',     // Pastikan nama kolom di DB 'entry_date'
         'type',           // LONG / SHORT
         'leverage',       // 1x - 125x
         'margin_mode',    // CROSS / ISOLATED
@@ -24,15 +24,13 @@ class FuturesTrade extends Model
         'margin',         // Modal (Cost)
         'tp_price',
         'sl_price',
-        'open_fee',
-        'entry_date',
+        'entry_screenshot', // <--- WAJIB ADA INI! (Ini yang bikin NULL terus tadi)
         'notes',
         'status'
     ];
 
     /**
      * Relasi ke Trading Account.
-     * Penting: Parameter kedua 'trading_account_id' wajib ada agar tidak error SQL.
      */
     public function tradingAccount(): BelongsTo
     {
