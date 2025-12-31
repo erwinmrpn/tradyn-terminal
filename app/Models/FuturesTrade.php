@@ -11,10 +11,11 @@ class FuturesTrade extends Model
     use HasFactory;
 
     protected $fillable = [
+        // --- OPEN POSITION FIELDS ---
         'trading_account_id',
         'symbol',
         'market_type',
-        'entry_date',     // Pastikan nama kolom di DB 'entry_date'
+        'entry_date',
         'type',           // LONG / SHORT
         'leverage',       // 1x - 125x
         'margin_mode',    // CROSS / ISOLATED
@@ -24,9 +25,17 @@ class FuturesTrade extends Model
         'margin',         // Modal (Cost)
         'tp_price',
         'sl_price',
-        'entry_screenshot', // <--- WAJIB ADA INI! (Ini yang bikin NULL terus tadi)
+        'entry_screenshot',
         'notes',
-        'status'
+        'status',         // OPEN / CLOSED
+
+        // --- CLOSE POSITION FIELDS ---
+        'exit_date',
+        'exit_price',
+        'fee',             // Fee saat close
+        'exit_reason',     // Reason (Hit TP/SL/Manual)
+        'exit_screenshot', // Gambar chart saat close
+        'pnl',             // Profit/Loss bersih
     ];
 
     /**

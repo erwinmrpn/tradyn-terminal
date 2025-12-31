@@ -63,6 +63,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/trade-log', [TradeLogController::class, 'index'])->name('trade.log');
     Route::post('/trade-log', [TradeLogController::class, 'store'])->name('trade.log.store');
 
+    // 9. Close Position
+    Route::post('/trade-log/close/{id}', [TradeLogController::class, 'closePosition'])->name('trade.log.close');
+
 });
 
 require __DIR__.'/auth.php';

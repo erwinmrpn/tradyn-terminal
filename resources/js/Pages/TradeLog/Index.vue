@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import Sidebar from '@/Components/Sidebar.vue';
 import Navbar from '@/Components/Navbar.vue';
 import Footer from '@/Components/Footer.vue';
-import { ref, watch, onMounted, computed } from 'vue';
+import { ref, watch, onMounted, computed, nextTick } from 'vue';
+import imageCompression from 'browser-image-compression';
 
-// --- IMPORT ANAK-ANAK (PARTIALS) ---
 import SpotForm from './Partials/SpotForm.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
+import FuturesClose from './Partials/FuturesClose.vue'; // Pastikan diimport
 
-// --- PROPS ---
 const props = defineProps<{
     trades: any[];
     activeType: string;
@@ -18,37 +18,142 @@ const props = defineProps<{
     selectedAccountId: string;
 }>();
 
-// --- FILTERED ACCOUNTS ---
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
     return props.accounts.filter(acc => acc.strategy_type === props.activeType);
 });
 
-// --- SIDEBAR ---
+const applySmartDefaults = () => {
+    if (filteredAccounts.value.length > 0) {
+        const firstAccountID = filteredAccounts.value[0].id;
+        form.trading_account_id = firstAccountID;
+        const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
+        if (selectedAccount.value === 'all' || !isCurrentSelectionValid) {
+             selectedAccount.value = firstAccountID;
+        }
+    } else {
+        form.trading_account_id = '';
+    }
+};
+
 const isSidebarCollapsed = ref(false);
 onMounted(() => {
     const saved = localStorage.getItem("sidebar_collapsed");
     if (saved === "true") isSidebarCollapsed.value = true;
+    applySmartDefaults();
 });
 const toggleSidebar = () => {
     isSidebarCollapsed.value = !isSidebarCollapsed.value;
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
-// --- LOGIC FILTER ---
 const selectedAccount = ref(props.selectedAccountId);
-
 const switchTab = (type: string) => {
     router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
 };
-
 watch(selectedAccount, (newAccount) => {
     if (newAccount && newAccount !== props.selectedAccountId) {
         router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
     }
 });
+watch(() => props.activeType, () => {
+    form.form_type = props.activeType;
+    form.type = props.activeType === 'FUTURES' ? 'LONG' : 'BUY';
+    futuresTab.value = 'OPEN';
+    form.errors = {};
+    nextTick(() => { applySmartDefaults(); });
+});
 
+const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
+const dynamicInput = ref(''); 
+const isCompressing = ref(false);
 const futuresTab = ref<'OPEN' | 'CLOSE' | 'RESULT'>('OPEN');
+
+const form = useForm({
+    trading_account_id: '',
+    date: new Date().toISOString().split('T')[0],
+    symbol: '',
+    market_type: 'CRYPTO',
+    price: '',
+    quantity: '', 
+    total: '',    
+    fee: '', 
+    notes: '',
+    type: 'BUY', 
+    form_type: props.activeType, 
+    leverage: 10,
+    margin_mode: 'CROSS',
+    order_type: 'MARKET',
+    tp_price: '',
+    sl_price: '',
+    screenshot: null as File | null,
+});
+
+const toggleInputMode = () => {
+    dynamicInput.value = '';
+    form.quantity = '';
+    form.total = '';
+    inputMode.value = inputMode.value === 'ASSET' ? 'TOTAL' : 'ASSET';
+};
+
+watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) => {
+    const price = parseFloat(newPrice as string) || 0;
+    const inputVal = parseFloat(newVal as string) || 0;
+    if (price > 0 && inputVal > 0) {
+        if (mode === 'ASSET') {
+            form.quantity = inputVal.toString();
+            form.total = (price * inputVal).toFixed(8); 
+        } else {
+            form.total = inputVal.toString();
+            form.quantity = (inputVal / price).toFixed(8);
+        }
+    } else {
+        form.quantity = '';
+        form.total = '';
+    }
+});
+
+const handleFileChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    const file = target.files ? target.files[0] : null;
+    if (file) {
+        const options = { maxSizeMB: 0.8, maxWidthOrHeight: 1920, useWebWorker: true };
+        try {
+            isCompressing.value = true; 
+            const compressedFile = await imageCompression(file, options);
+            const newFile = new File([compressedFile], file.name, { type: file.type });
+            form.screenshot = newFile;
+        } catch (error) {
+            alert("Gagal mengompres gambar.");
+        } finally {
+            isCompressing.value = false;
+        }
+    }
+};
+
+const submitTrade = () => {
+    if (!form.trading_account_id) { alert("Please select a trading account."); return; }
+    if (!form.symbol) { alert("Please enter an asset symbol."); return; }
+    if (!form.price) { alert("Price is required."); return; }
+    if (isCompressing.value) { alert("Please wait, compressing image..."); return; }
+    
+    form.post(route('trade.log.store'), {
+        forceFormData: true, 
+        onSuccess: () => {
+            form.reset('symbol', 'price', 'quantity', 'total', 'fee', 'notes', 'tp_price', 'sl_price', 'screenshot');
+            dynamicInput.value = ''; 
+            const fileInput = document.getElementById('file-upload-futures') as HTMLInputElement;
+            if(fileInput) fileInput.value = '';
+            document.getElementById('input-symbol')?.focus();
+            applySmartDefaults(); 
+        },
+        onError: (errors) => {
+            console.error("Server Error:", errors);
+            alert("Failed to save trade.");
+        },
+        preserveScroll: true
+    });
+};
 
 const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -105,12 +210,12 @@ const formatCurrency = (value: number) => {
                     </div>
 
                     <FuturesOpen v-if="futuresTab === 'OPEN'" :accounts="filteredAccounts" />
-
-                    <div v-else-if="futuresTab === 'CLOSE'" class="text-center py-12 text-gray-500"><i class="fas fa-lock text-2xl mb-2"></i><p>Close Position Module Coming Soon</p></div>
+                    <FuturesClose v-else-if="futuresTab === 'CLOSE'" :trades="props.trades" />
+                    
                     <div v-else-if="futuresTab === 'RESULT'" class="text-center py-12 text-gray-500"><i class="fas fa-chart-line text-2xl mb-2"></i><p>Reflection & Result Module Coming Soon</p></div>
                 </div>
 
-                <div class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
+                <div v-if="!(props.activeType === 'FUTURES' && futuresTab === 'CLOSE')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
                     <div class="p-4 border-b border-[#1f2128] bg-[#1a1b20]/50 flex justify-between items-center">
                         <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">History Log</h3>
                         <span class="text-[10px] text-gray-600">Recent activity</span>
@@ -124,8 +229,15 @@ const formatCurrency = (value: number) => {
                                     <th class="px-6 py-3">Type</th>
                                     <th class="px-6 py-3 text-right">Price</th>
                                     <th class="px-6 py-3 text-right">Size/Qty</th>
-                                    <template v-if="props.activeType === 'SPOT'"><th class="px-6 py-3 text-right">Total</th><th class="px-6 py-3 text-right">Fee</th></template>
-                                    <template v-else><th class="px-6 py-3 text-right">Margin</th><th class="px-6 py-3 text-center">Lev</th><th class="px-6 py-3 text-right">Chart</th></template>
+                                    <template v-if="props.activeType === 'SPOT'">
+                                        <th class="px-6 py-3 text-right">Total</th>
+                                        <th class="px-6 py-3 text-right">Fee</th>
+                                    </template>
+                                    <template v-else>
+                                        <th class="px-6 py-3 text-right">Margin</th>
+                                        <th class="px-6 py-3 text-center">Lev</th>
+                                        <th class="px-6 py-3 text-right">Chart</th>
+                                    </template>
                                     <th class="px-6 py-3">Notes</th>
                                 </tr>
                             </thead>
@@ -155,8 +267,14 @@ const formatCurrency = (value: number) => {
                         </table>
                     </div>
                 </div>
+
             </main>
             <Footer :is-sidebar-collapsed="isSidebarCollapsed" />
         </div>
     </div>
 </template>
+
+<style scoped>
+.no-spinner::-webkit-outer-spin-button, .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spinner { appearance: textfield; -moz-appearance: textfield; }
+</style>

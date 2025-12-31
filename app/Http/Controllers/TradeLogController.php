@@ -33,7 +33,11 @@ class TradeLogController extends Controller
             });
         }
 
-        $trades = $query->with('tradingAccount')->latest($type === 'SPOT' ? 'date' : 'entry_date')->get();
+        // Ambil data terbaru
+        $trades = $query->with('tradingAccount')
+            ->latest($type === 'SPOT' ? 'date' : 'entry_date')
+            ->get();
+            
         $accounts = $user->tradingAccounts;
 
         $totalBalance = $user->tradingAccounts()
@@ -54,21 +58,18 @@ class TradeLogController extends Controller
         // 1. Validasi Tipe Form
         $request->validate(['form_type' => 'required|in:SPOT,FUTURES']);
 
-        // 2. LOGIKA UPLOAD SCREENSHOT (Disederhanakan)
-        // Kita tidak peduli tipe formnya apa, kalau ada file 'screenshot', kita simpan.
+        // 2. LOGIKA UPLOAD SCREENSHOT (Global)
         $screenshotPath = null;
 
         if ($request->hasFile('screenshot')) {
-            // Validasi file (Gambar, Maks 5MB)
             $request->validate([
                 'screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120'
             ]);
-            
             // Simpan ke folder 'public/screenshots'
             $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
         }
 
-        // === LOGIKA FUTURES ===
+        // === LOGIKA FUTURES (OPEN POSITION) ===
         if ($request->form_type === 'FUTURES') {
             
             $validated = $request->validate([
@@ -93,6 +94,7 @@ class TradeLogController extends Controller
             if ($account->balance < $validated['total']) {
                  return back()->withErrors(['balance' => 'Insufficient futures balance!']);
             }
+            // Kurangi saldo saat Open Position
             $account->decrement('balance', $validated['total']);
 
             // Simpan ke Database
@@ -110,7 +112,6 @@ class TradeLogController extends Controller
                 'margin' => $validated['total'],
                 'tp_price' => $validated['tp_price'],
                 'sl_price' => $validated['sl_price'],
-                // Variabel $screenshotPath pasti terisi jika file ada
                 'entry_screenshot' => $screenshotPath, 
                 'notes' => $validated['notes'],
                 'status' => 'OPEN'
@@ -158,12 +159,75 @@ class TradeLogController extends Controller
                 'quantity' => $validated['quantity'],
                 'total' => $validated['total'],
                 'fee' => $fee,
-                // Spot tidak menyimpan screenshot
                 'date' => $validated['date'],
                 'notes' => $validated['notes'],
             ]);
 
             return redirect()->back()->with('success', 'Spot trade saved successfully.');
         }
+    }
+
+    /**
+     * [BARU] Menangani Close Position Futures
+     */
+    public function closePosition(Request $request, $id)
+    {
+        // Cari trade berdasarkan ID
+        $trade = FuturesTrade::findOrFail($id);
+        
+        // Pastikan trade ini milik salah satu akun user yang login (Security Check)
+        if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        // Validasi Input Close
+        $validated = $request->validate([
+            'exit_date' => 'required|date',
+            'exit_price' => 'required|numeric|min:0',
+            'fee' => 'required|numeric|min:0',
+            'exit_reason' => 'required|string',
+            'notes' => 'nullable|string',
+            'exit_screenshot' => 'nullable|image|max:5120',
+        ]);
+
+        // 1. Handle Screenshot Close (Jika ada)
+        $exitScreenshotPath = null;
+        if ($request->hasFile('exit_screenshot')) {
+            $exitScreenshotPath = $request->file('exit_screenshot')->store('screenshots', 'public');
+        }
+
+        // 2. Hitung Gross PnL
+        // Rumus: (Exit - Entry) * Qty * Direction
+        $pnlGross = 0;
+        if ($trade->type === 'LONG') {
+            $pnlGross = ($validated['exit_price'] - $trade->entry_price) * $trade->quantity;
+        } else { // SHORT
+            $pnlGross = ($trade->entry_price - $validated['exit_price']) * $trade->quantity;
+        }
+
+        // 3. Hitung Net PnL (Gross - Fee)
+        $netPnL = $pnlGross - $validated['fee'];
+
+        // 4. Update Saldo Akun
+        // Kembalikan Margin Awal + Net PnL ke saldo akun
+        $account = TradingAccount::find($trade->trading_account_id);
+        $amountToReturn = $trade->margin + $netPnL;
+        
+        $account->balance += $amountToReturn;
+        $account->save();
+
+        // 5. Update Data Trade di Database
+        $trade->update([
+            'status' => 'CLOSED',
+            'exit_date' => $validated['exit_date'],
+            'exit_price' => $validated['exit_price'],
+            'fee' => $validated['fee'],
+            'pnl' => $netPnL,
+            'exit_reason' => $validated['exit_reason'],
+            'notes' => $trade->notes . ($validated['notes'] ? "\n[Close]: " . $validated['notes'] : ""),
+            'exit_screenshot' => $exitScreenshotPath,
+        ]);
+
+        return redirect()->back()->with('success', 'Position closed successfully. PnL: $' . number_format($netPnL, 2));
     }
 }
