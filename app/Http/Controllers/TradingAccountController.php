@@ -14,7 +14,15 @@ class TradingAccountController extends Controller
      */
     public function create()
     {
-        return Inertia::render('TradingAccount/Create');
+        // Cek apakah user sudah memiliki minimal 1 akun trading
+        $hasAccount = Auth::user()->tradingAccounts()->exists();
+
+        return Inertia::render('TradingAccount/Create', [
+            // Kirim status ke frontend: 
+            // Jika false (belum punya akun) -> Tampilkan Fullscreen Setup
+            // Jika true (sudah punya) -> Tampilkan Dashboard Layout
+            'isInitialSetup' => !$hasAccount 
+        ]);
     }
 
     /**

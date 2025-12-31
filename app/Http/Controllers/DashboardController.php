@@ -2,92 +2,67 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Trade;
-use App\Models\TradingAccount;
-use App\Models\AccountTransaction; // <--- JANGAN LUPA IMPORT INI
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
+use App\Models\TradingAccount;
+use App\Models\SpotTrade;     // Model Baru
+use App\Models\FuturesTrade;  // Model Baru
 
 class DashboardController extends Controller
 {
     public function index()
     {
-        $userId = auth()->id();
+        $userId = Auth::id();
 
-        // --- 1. DATA SALDO SAAT INI ---
+        // 1. Hitung Total Balance (Dari semua akun user)
         $totalBalance = TradingAccount::where('user_id', $userId)->sum('balance');
 
-        // --- 2. HITUNG PERUBAHAN 24 JAM TERAKHIR ---
-        // Kita perlu tahu saldo kemarin untuk menghitung % kenaikan/penurunan
+        // 2. Hitung Active Positions (Khusus Futures yang statusnya OPEN)
+        $activePositions = FuturesTrade::whereHas('tradingAccount', function ($q) use ($userId) {
+            $q->where('user_id', $userId);
+        })->where('status', 'OPEN')->count();
+
+        // 3. Today's PnL (Sementara 0, karena fitur Close Position belum dibuat)
+        // Nanti kita akan query ke tabel FuturesTrade yang statusnya CLOSED & tanggal hari ini
+        $todaysPnL = 0; 
+
+        // 4. Ambil Recent Activity (Gabungan Spot & Futures)
         
-        // A. Hitung PnL (Profit/Loss) Hari Ini
-        $todaysPnL = Trade::whereHas('tradingAccount', function ($q) use ($userId) {
-            $q->where('user_id', $userId);
-        })
-        ->where('status', 'CLOSED')
-        ->whereDate('updated_at', Carbon::today()) // Asumsi trade ditutup hari ini
-        ->sum('pnl');
-
-        // B. Hitung Net Flow (Deposit - Withdraw) Hari Ini
-        // Kita pakai raw query biar cepat hitung selisihnya
-        $todaysNetFlow = AccountTransaction::whereHas('tradingAccount', function($q) use ($userId) {
-            $q->where('user_id', $userId);
-        })
-        ->whereDate('date', Carbon::today())
-        ->sum(\DB::raw("CASE WHEN type = 'DEPOSIT' THEN amount ELSE -amount END"));
-
-        // C. Rekonstruksi Saldo Kemarin
-        // Rumus: Saldo Sekarang - (Uang Masuk Hari Ini + Profit Hari Ini)
-        $yesterdayBalance = $totalBalance - ($todaysNetFlow + $todaysPnL);
-
-        // D. Hitung Persentase Perubahan
-        $dailyChangePct = 0;
-        if ($yesterdayBalance > 0) {
-            $diff = $totalBalance - $yesterdayBalance;
-            $dailyChangePct = ($diff / $yesterdayBalance) * 100;
-        } elseif ($yesterdayBalance == 0 && $totalBalance > 0) {
-            $dailyChangePct = 100; // Kalau kemarin 0 dan sekarang ada isi, naik 100%
-        }
-
-        // --- 3. DATA LAINNYA (SAMA SEPERTI SEBELUMNYA) ---
-        $trades = Trade::whereHas('tradingAccount', function ($q) use ($userId) {
-            $q->where('user_id', $userId);
-        })->get();
-
-        $netProfit = $trades->where('status', 'CLOSED')->sum('pnl');
-
-        $closedTrades = $trades->where('status', 'CLOSED');
-        $totalClosed = $closedTrades->count();
-        $wins = $closedTrades->where('pnl', '>', 0)->count();
-        $winRate = $totalClosed > 0 ? round(($wins / $totalClosed) * 100, 1) : 0;
-        $activePositions = $trades->where('status', 'OPEN')->count();
-
-        // Data Chart Dummy (Bisa diganti logic real nanti)
-        $growthSeries = [$totalBalance * 0.9, $totalBalance * 0.95, $totalBalance]; 
-        $performanceSeries = [$wins, $closedTrades->where('pnl', '<=', 0)->count(), 0];
-
-        // Recent Trades
-        $recentTrades = Trade::with('tradingAccount')
-            ->whereHas('tradingAccount', function ($q) use ($userId) {
-                $q->where('user_id', $userId);
-            })
-            ->latest('created_at')
+        // Ambil 5 Spot Terakhir
+        $recentSpot = SpotTrade::with('tradingAccount')
+            ->whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->latest('date')
             ->take(5)
-            ->get();
+            ->get()
+            ->map(function ($trade) {
+                $trade->category = 'SPOT'; // Label manual untuk UI
+                $trade->display_date = $trade->date; // Normalisasi tanggal
+                return $trade;
+            });
+
+        // Ambil 5 Futures Terakhir
+        $recentFutures = FuturesTrade::with('tradingAccount')
+            ->whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->latest('entry_date')
+            ->take(5)
+            ->get()
+            ->map(function ($trade) {
+                $trade->category = 'FUTURES'; // Label manual untuk UI
+                $trade->display_date = $trade->entry_date; // Normalisasi tanggal
+                return $trade;
+            });
+
+        // Gabungkan dan Urutkan berdasarkan tanggal terbaru
+        $recentTrades = $recentSpot->concat($recentFutures)
+            ->sortByDesc('display_date')
+            ->take(5)
+            ->values();
 
         return Inertia::render('Dashboard', [
-            'stats' => [
-                'total_balance' => $totalBalance,
-                'daily_change_pct' => round($dailyChangePct, 2), // <--- KITA KIRIM INI
-                'net_profit' => $netProfit,
-                'win_rate' => $winRate,
-                'active_positions' => $activePositions,
-            ],
-            'charts' => [
-                'growth' => $growthSeries,
-                'performance' => $performanceSeries
-            ],
+            'totalBalance' => $totalBalance,
+            'activePositions' => $activePositions,
+            'todaysPnL' => $todaysPnL,
             'recentTrades' => $recentTrades
         ]);
     }

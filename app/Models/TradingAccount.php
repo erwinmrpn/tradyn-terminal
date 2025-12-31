@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TradingAccount extends Model
@@ -13,21 +14,32 @@ class TradingAccount extends Model
     protected $fillable = [
         'user_id',
         'name',
-        'exchange',       // <--- Tambahkan ini
-        'strategy_type',  // <--- Tambahkan ini
+        'exchange',
+        'strategy_type',
         'balance',
         'currency',
     ];
 
-    // Relasi: Satu akun punya banyak transaksi deposit/wd
-    public function transactions(): HasMany
+    public function user(): BelongsTo
     {
-        return $this->hasMany(AccountTransaction::class);
+        return $this->belongsTo(User::class);
     }
 
-    // Relasi: Satu akun punya banyak history trade
-    public function trades(): HasMany
+    /**
+     * Relasi ke History Spot
+     */
+    public function spotTrades(): HasMany
     {
-        return $this->hasMany(Trade::class);
+        return $this->hasMany(SpotTrade::class, 'trading_account_id');
     }
+
+    /**
+     * Relasi ke History Futures
+     */
+    public function futuresTrades(): HasMany
+    {
+        return $this->hasMany(FuturesTrade::class, 'trading_account_id');
+    }
+    
+    // Pastikan tidak ada fungsi "trades()" yang memanggil "Trade::class" lagi di sini
 }
