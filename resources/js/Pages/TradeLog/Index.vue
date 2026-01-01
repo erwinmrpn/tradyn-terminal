@@ -9,28 +9,60 @@ import imageCompression from 'browser-image-compression';
 import SpotForm from './Partials/SpotForm.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
 import FuturesClose from './Partials/FuturesClose.vue';
+import ResultSection from './Partials/ResultSection.vue';
 
 const props = defineProps<{
     trades: any[];
     activeType: string;
     accounts: any[];
-    totalBalance: number;
+    // Terima dua balance terpisah
+    spotBalance: number;
+    futuresBalance: number;
     selectedAccountId: string;
 }>();
+
+// --- STATE SUB-TAB RESULT (SPOT/FUTURES) ---
+// Ini kita taruh di Parent agar bisa mengontrol Filter Akun & Balance
+const resultSubTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
+
+// --- LOGIKA BALANCE DINAMIS ---
+const displayedBalance = computed(() => {
+    if (props.activeType === 'SPOT') return props.spotBalance;
+    if (props.activeType === 'FUTURES') return props.futuresBalance;
+    if (props.activeType === 'RESULT') {
+        // Balance berubah sesuai Sub-Tab Result yang dipilih
+        return resultSubTab.value === 'SPOT' ? props.spotBalance : props.futuresBalance;
+    }
+    return 0;
+});
 
 // --- LOGIKA FILTER AKUN ---
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
-    let filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
+    
+    let filterType = props.activeType;
+    
+    // Jika di Tab Result, filter akun ikut Sub-Tab (Result Spot -> Akun Spot, dst)
+    if (filterType === 'RESULT') {
+        filterType = resultSubTab.value; 
+    }
+
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
-// --- SMART DEFAULT ---
+// --- SMART DEFAULT ACCOUNT ---
+// Otomatis pilih akun pertama sesuai filter
+const form = useForm({ trading_account_id: '' });
+
 const applySmartDefaults = () => {
     if (filteredAccounts.value.length > 0) {
         const firstAccountID = filteredAccounts.value[0].id;
         form.trading_account_id = firstAccountID;
+        
+        // Cek apakah akun yang sedang dipilih di filter atas masih valid?
         const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
+        
+        // Jika All Accounts atau akun tidak valid, ganti ke default
         if (selectedAccount.value === 'all' || !isCurrentSelectionValid) {
              selectedAccount.value = firstAccountID;
         }
@@ -38,6 +70,13 @@ const applySmartDefaults = () => {
         form.trading_account_id = '';
     }
 };
+
+// Trigger Smart Default saat Sub-Tab Result berubah
+watch(resultSubTab, () => {
+    if (props.activeType === 'RESULT') {
+        applySmartDefaults();
+    }
+});
 
 const isSidebarCollapsed = ref(false);
 onMounted(() => {
@@ -50,113 +89,25 @@ const toggleSidebar = () => {
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
+// --- NAVIGASI TAB UTAMA ---
 const selectedAccount = ref(props.selectedAccountId);
 const switchTab = (type: string) => {
     router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
 };
+
 watch(selectedAccount, (newAccount) => {
     if (newAccount && newAccount !== props.selectedAccountId) {
         router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
     }
 });
-watch(() => props.activeType, () => {
-    form.form_type = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
-    form.type = (props.activeType === 'FUTURES' || props.activeType === 'RESULT') ? 'LONG' : 'BUY';
-    futuresTab.value = 'OPEN';
-    form.errors = {};
-    nextTick(() => { applySmartDefaults(); });
-});
 
-const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
-const dynamicInput = ref(''); 
-const isCompressing = ref(false);
 const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
 
-const form = useForm({
-    trading_account_id: '',
-    date: new Date().toISOString().split('T')[0],
-    symbol: '',
-    market_type: 'CRYPTO',
-    price: '',
-    quantity: '', 
-    total: '',    
-    fee: '', 
-    notes: '',
-    type: 'BUY', 
-    form_type: props.activeType, 
-    leverage: 10,
-    margin_mode: 'CROSS',
-    order_type: 'MARKET',
-    tp_price: '',
-    sl_price: '',
-    screenshot: null as File | null,
+watch(() => props.activeType, () => {
+    // Reset defaults saat tab utama pindah
+    if (props.activeType === 'FUTURES') futuresTab.value = 'OPEN';
+    nextTick(() => { applySmartDefaults(); });
 });
-
-const toggleInputMode = () => {
-    dynamicInput.value = '';
-    form.quantity = '';
-    form.total = '';
-    inputMode.value = inputMode.value === 'ASSET' ? 'TOTAL' : 'ASSET';
-};
-
-watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) => {
-    const price = parseFloat(newPrice as string) || 0;
-    const inputVal = parseFloat(newVal as string) || 0;
-    if (price > 0 && inputVal > 0) {
-        if (mode === 'ASSET') {
-            form.quantity = inputVal.toString();
-            form.total = (price * inputVal).toFixed(8); 
-        } else {
-            form.total = inputVal.toString();
-            form.quantity = (inputVal / price).toFixed(8);
-        }
-    } else {
-        form.quantity = '';
-        form.total = '';
-    }
-});
-
-const handleFileChange = async (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const file = target.files ? target.files[0] : null;
-    if (file) {
-        const options = { maxSizeMB: 0.8, maxWidthOrHeight: 1920, useWebWorker: true };
-        try {
-            isCompressing.value = true; 
-            const compressedFile = await imageCompression(file, options);
-            const newFile = new File([compressedFile], file.name, { type: file.type });
-            form.screenshot = newFile;
-        } catch (error) {
-            alert("Gagal mengompres gambar.");
-        } finally {
-            isCompressing.value = false;
-        }
-    }
-};
-
-const submitTrade = () => {
-    if (!form.trading_account_id) { alert("Please select a trading account."); return; }
-    if (!form.symbol) { alert("Please enter an asset symbol."); return; }
-    if (!form.price) { alert("Price is required."); return; }
-    if (isCompressing.value) { alert("Please wait, compressing image..."); return; }
-    
-    form.post(route('trade.log.store'), {
-        forceFormData: true, 
-        onSuccess: () => {
-            form.reset('symbol', 'price', 'quantity', 'total', 'fee', 'notes', 'tp_price', 'sl_price', 'screenshot');
-            dynamicInput.value = ''; 
-            const fileInput = document.getElementById('file-upload-futures') as HTMLInputElement;
-            if(fileInput) fileInput.value = '';
-            document.getElementById('input-symbol')?.focus();
-            applySmartDefaults(); 
-        },
-        onError: (errors) => {
-            console.error("Server Error:", errors);
-            alert("Failed to save trade.");
-        },
-        preserveScroll: true
-    });
-};
 
 const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -178,7 +129,6 @@ const formatCurrency = (value: number) => {
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-lg border border-[#2d2f36] relative shadow-inner">
-                        
                         <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] bg-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(16,185,129,0.4)] z-0" 
                             :class="{
                                 'left-1': props.activeType === 'SPOT',
@@ -186,19 +136,19 @@ const formatCurrency = (value: number) => {
                                 'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'
                             }">
                         </div>
-
                         <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
                         <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
-                        <button @click="switchTab('RESULT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">RESULT TRADES</button>
+                        <button @click="switchTab('RESULT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">RESULT</button>
                     </div>
                 </div>
 
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
                         <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
-                            Total {{ props.activeType === 'RESULT' ? 'FUTURES' : props.activeType }} Balance
+                            <span v-if="props.activeType === 'RESULT'">Total {{ resultSubTab }} Balance</span>
+                            <span v-else>Total {{ props.activeType }} Balance</span>
                         </div>
-                        <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(props.totalBalance) }}</div>
+                        <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(displayedBalance) }}</div>
                     </div>
                     <div class="relative w-full sm:w-64">
                          <select v-model="selectedAccount" class="bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-8 appearance-none cursor-pointer">
@@ -214,37 +164,24 @@ const formatCurrency = (value: number) => {
                 <SpotForm v-if="props.activeType === 'SPOT'" :accounts="filteredAccounts" />
 
                 <div v-if="props.activeType === 'FUTURES'">
-                    
                     <div class="flex justify-center mb-8">
                         <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
-                            
                             <div class="absolute top-1 bottom-1 w-[calc(50%_-_4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)] z-0" 
                                 :class="{
                                     'left-1': futuresTab === 'OPEN',
                                     'left-[calc(50%_+_2px)]': futuresTab === 'CLOSE'
                                 }">
                             </div>
-
-                            <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" 
-                                :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">
-                                Open Position
-                            </button>
-                            <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" 
-                                :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">
-                                Close Position
-                            </button>
+                            <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
+                            <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
                         </div>
                     </div>
-
                     <FuturesOpen v-if="futuresTab === 'OPEN'" :accounts="filteredAccounts" />
                     <FuturesClose v-else-if="futuresTab === 'CLOSE'" :trades="props.trades" />
                 </div>
 
-                <div v-if="props.activeType === 'RESULT'" class="text-center py-20 bg-[#121317] border border-[#1f2128] rounded-xl">
-                    <i class="fas fa-chart-line text-4xl text-gray-600 mb-4"></i>
-                    <h3 class="text-xl font-bold text-gray-400">Trade Results</h3>
-                    <p class="text-sm text-gray-600 mt-2">Comprehensive history and performance analysis coming soon.</p>
-                    <p class="text-xs text-gray-700 mt-1">Data is already filtered for closed positions in the backend.</p>
+                <div v-if="props.activeType === 'RESULT'">
+                    <ResultSection v-model:activeTab="resultSubTab" />
                 </div>
 
                 <div v-if="props.activeType === 'SPOT' || (props.activeType === 'FUTURES' && futuresTab === 'OPEN')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">

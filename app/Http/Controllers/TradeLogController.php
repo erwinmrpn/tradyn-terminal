@@ -24,7 +24,6 @@ class TradeLogController extends Controller
         // --- 1. LOGIKA QUERY DATA BERDASARKAN TAB ---
         if ($type === 'FUTURES') {
             // Tab FUTURES utama: Fokus pada posisi yang masih AKTIF (OPEN)
-            // Karena user akan melakukan Open Position atau Close Position di sini.
             $query = FuturesTrade::query()->where('status', 'OPEN');
         } 
         elseif ($type === 'RESULT') {
@@ -47,8 +46,6 @@ class TradeLogController extends Controller
         }
 
         // --- 3. SORTING DATA ---
-        // Spot: berdasarkan tanggal transaksi
-        // Futures/Result: berdasarkan entry date atau exit date
         $sortField = ($type === 'SPOT') ? 'date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
         
         $trades = $query->with('tradingAccount')
@@ -57,10 +54,14 @@ class TradeLogController extends Controller
             
         $accounts = $user->tradingAccounts;
 
-        // --- 4. HITUNG TOTAL BALANCE ---
-        // Jika sedang di tab RESULT, kita tampilkan saldo FUTURES
+        // --- [NEW] 4. HITUNG BALANCE TERPISAH (SPOT & FUTURES) ---
+        // Kita kirim dua variabel terpisah agar frontend bisa switch otomatis tanpa reload
+        $spotBalance = $user->tradingAccounts()->where('strategy_type', 'SPOT')->sum('balance');
+        $futuresBalance = $user->tradingAccounts()->where('strategy_type', 'FUTURES')->sum('balance');
+
+        // Untuk kompatibilitas kode lama (jika ada yang masih pakai totalBalance)
+        // Jika type RESULT, defaultnya ambil futures balance
         $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
-        
         $totalBalance = $user->tradingAccounts()
             ->where('strategy_type', $balanceType)
             ->sum('balance');
@@ -69,7 +70,9 @@ class TradeLogController extends Controller
             'trades' => $trades,
             'activeType' => $type,
             'accounts' => $accounts,
-            'totalBalance' => $totalBalance,
+            'totalBalance' => $totalBalance, // Tetap dikirim untuk kompatibilitas
+            'spotBalance' => $spotBalance,     // [NEW] Balance Spot Global User
+            'futuresBalance' => $futuresBalance, // [NEW] Balance Futures Global User
             'selectedAccountId' => $accountId
         ]);
     }
