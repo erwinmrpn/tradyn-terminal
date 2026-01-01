@@ -4,8 +4,8 @@ import Sidebar from '@/Components/Sidebar.vue';
 import Navbar from '@/Components/Navbar.vue';
 import Footer from '@/Components/Footer.vue';
 import { ref, watch, onMounted, computed, nextTick } from 'vue';
-import imageCompression from 'browser-image-compression';
 
+// --- IMPORT KOMPONEN TERPISAH ---
 import SpotForm from './Partials/SpotForm.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
 import FuturesClose from './Partials/FuturesClose.vue';
@@ -15,54 +15,93 @@ const props = defineProps<{
     trades: any[];
     activeType: string;
     accounts: any[];
-    // Terima dua balance terpisah
+    totalBalance: number;
     spotBalance: number;
     futuresBalance: number;
     selectedAccountId: string;
 }>();
 
-// --- STATE SUB-TAB RESULT (SPOT/FUTURES) ---
-// Ini kita taruh di Parent agar bisa mengontrol Filter Akun & Balance
-const resultSubTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
+// --- 1. LOGIKA MODAL DELETE ---
+const showDeleteModal = ref(false);
+const tradeToDelete = ref<any>(null);
 
-// --- LOGIKA BALANCE DINAMIS ---
-const displayedBalance = computed(() => {
-    if (props.activeType === 'SPOT') return props.spotBalance;
-    if (props.activeType === 'FUTURES') return props.futuresBalance;
-    if (props.activeType === 'RESULT') {
-        // Balance berubah sesuai Sub-Tab Result yang dipilih
-        return resultSubTab.value === 'SPOT' ? props.spotBalance : props.futuresBalance;
-    }
-    return 0;
-});
+const confirmDelete = (trade: any) => {
+    tradeToDelete.value = trade;
+    showDeleteModal.value = true;
+};
+const cancelDelete = () => {
+    showDeleteModal.value = false;
+    tradeToDelete.value = null;
+};
+const proceedDelete = () => {
+    if (!tradeToDelete.value) return;
+    router.delete(route('trade.log.destroy', { id: tradeToDelete.value.id, type: props.activeType }), {
+        onSuccess: () => { showDeleteModal.value = false; tradeToDelete.value = null; },
+        preserveScroll: true
+    });
+};
 
-// --- LOGIKA FILTER AKUN ---
+// --- 2. LOGIKA MODAL VIEW NOTE ---
+const showNoteModal = ref(false);
+const noteContent = ref('');
+const noteTitle = ref('Note'); 
+
+const viewNote = (note: string, type: 'Entry' | 'Close' | 'Cancel' | 'Spot') => {
+    noteContent.value = note || 'No notes available.';
+    // Set judul modal sesuai tipe note
+    if (type === 'Spot') noteTitle.value = 'Trade Note';
+    else if (type === 'Close') noteTitle.value = 'Close Position Note';
+    else if (type === 'Cancel') noteTitle.value = 'Cancellation Reason';
+    else noteTitle.value = 'Entry Note';
+    
+    showNoteModal.value = true;
+};
+const closeNoteModal = () => { showNoteModal.value = false; noteContent.value = ''; };
+
+// --- 3. LOGIKA MODAL IMAGE & DOWNLOAD ---
+const showImageModal = ref(false);
+const selectedImageUrl = ref('');
+const selectedImageName = ref('');
+
+const openImageModal = (imagePath: string, type: 'Entry' | 'Exit') => {
+    selectedImageUrl.value = imagePath.startsWith('http') ? imagePath : `/storage/${imagePath}`;
+    selectedImageName.value = `${type}-Chart-${Date.now()}.png`;
+    showImageModal.value = true;
+};
+const closeImageModal = () => { showImageModal.value = false; selectedImageUrl.value = ''; };
+
+const downloadImage = () => {
+    if (!selectedImageUrl.value) return;
+    const link = document.createElement('a');
+    link.href = selectedImageUrl.value;
+    link.download = selectedImageName.value;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+// --- 4. LOGIKA UTAMA (FILTER & BALANCE) ---
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
-    
-    let filterType = props.activeType;
-    
-    // Jika di Tab Result, filter akun ikut Sub-Tab (Result Spot -> Akun Spot, dst)
-    if (filterType === 'RESULT') {
-        filterType = resultSubTab.value; 
-    }
-
+    let filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
-// --- SMART DEFAULT ACCOUNT ---
-// Otomatis pilih akun pertama sesuai filter
+const displayedBalance = computed(() => {
+    if (props.activeType === 'SPOT') return props.spotBalance;
+    if (props.activeType === 'FUTURES') return props.futuresBalance;
+    if (props.activeType === 'RESULT') return resultSubTab.value === 'SPOT' ? props.spotBalance : props.futuresBalance;
+    return 0;
+});
+
 const form = useForm({ trading_account_id: '' });
+const resultSubTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
 
 const applySmartDefaults = () => {
     if (filteredAccounts.value.length > 0) {
         const firstAccountID = filteredAccounts.value[0].id;
         form.trading_account_id = firstAccountID;
-        
-        // Cek apakah akun yang sedang dipilih di filter atas masih valid?
         const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
-        
-        // Jika All Accounts atau akun tidak valid, ganti ke default
         if (selectedAccount.value === 'all' || !isCurrentSelectionValid) {
              selectedAccount.value = firstAccountID;
         }
@@ -71,12 +110,7 @@ const applySmartDefaults = () => {
     }
 };
 
-// Trigger Smart Default saat Sub-Tab Result berubah
-watch(resultSubTab, () => {
-    if (props.activeType === 'RESULT') {
-        applySmartDefaults();
-    }
-});
+watch(resultSubTab, () => { if (props.activeType === 'RESULT') applySmartDefaults(); });
 
 const isSidebarCollapsed = ref(false);
 onMounted(() => {
@@ -89,12 +123,10 @@ const toggleSidebar = () => {
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
-// --- NAVIGASI TAB UTAMA ---
 const selectedAccount = ref(props.selectedAccountId);
 const switchTab = (type: string) => {
     router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
 };
-
 watch(selectedAccount, (newAccount) => {
     if (newAccount && newAccount !== props.selectedAccountId) {
         router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
@@ -102,9 +134,7 @@ watch(selectedAccount, (newAccount) => {
 });
 
 const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
-
 watch(() => props.activeType, () => {
-    // Reset defaults saat tab utama pindah
     if (props.activeType === 'FUTURES') futuresTab.value = 'OPEN';
     nextTick(() => { applySmartDefaults(); });
 });
@@ -145,8 +175,7 @@ const formatCurrency = (value: number) => {
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
                         <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
-                            <span v-if="props.activeType === 'RESULT'">Total {{ resultSubTab }} Balance</span>
-                            <span v-else>Total {{ props.activeType }} Balance</span>
+                            Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance
                         </div>
                         <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(displayedBalance) }}</div>
                     </div>
@@ -207,7 +236,9 @@ const formatCurrency = (value: number) => {
                                         <th class="px-6 py-3 text-center">Lev</th>
                                         <th class="px-6 py-3 text-right">Chart</th>
                                     </template>
-                                    <th class="px-6 py-3">Notes</th>
+                                    <th class="px-6 py-3 text-right">Notes</th>
+                                    <th class="px-6 py-3 text-center">Status</th> 
+                                    <th class="px-6 py-3 text-center">Action</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-[#1f2128]">
@@ -217,6 +248,7 @@ const formatCurrency = (value: number) => {
                                     <td class="px-6 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span></td>
                                     <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(props.activeType === 'SPOT' ? trade.price : trade.entry_price) }}</td>
                                     <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ Number(trade.quantity) }}</td>
+                                    
                                     <template v-if="props.activeType === 'SPOT'">
                                         <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.total) }}</td>
                                         <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">{{ formatCurrency(trade.fee) }}</td>
@@ -224,14 +256,51 @@ const formatCurrency = (value: number) => {
                                     <template v-else>
                                         <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.margin) }}</td>
                                         <td class="px-6 py-3 text-center text-yellow-500 text-xs font-bold">{{ trade.leverage }}x</td>
+                                        
                                         <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
-                                            <a v-if="trade.entry_screenshot" :href="'/storage/' + trade.entry_screenshot" target="_blank" class="text-blue-400 hover:text-blue-300 underline">View</a>
-                                            <span v-else class="text-gray-600">-</span>
+                                            <div class="flex flex-col items-end gap-1">
+                                                <button v-if="trade.entry_screenshot" @click.prevent="openImageModal(trade.entry_screenshot, 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">Entry Chart</button>
+                                                <button v-if="trade.exit_screenshot" @click.prevent="openImageModal(trade.exit_screenshot, 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">Exit Chart</button>
+                                                <span v-if="!trade.entry_screenshot && !trade.exit_screenshot" class="text-gray-600">-</span>
+                                            </div>
                                         </td>
                                     </template>
-                                    <td class="px-6 py-3 text-gray-500 text-xs italic truncate max-w-[150px]">{{ trade.notes }}</td>
+                                    
+                                    <td class="px-6 py-3 text-right font-bold text-xs font-mono">
+                                        <div class="flex flex-col items-end gap-1">
+                                            
+                                            <button v-if="trade.entry_notes || (props.activeType === 'SPOT' && trade.notes)" 
+                                                @click="viewNote(trade.entry_notes || trade.notes, props.activeType === 'SPOT' ? 'Spot' : 'Entry')" 
+                                                class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
+                                                {{ props.activeType === 'SPOT' ? 'Trade Note' : 'Entry Note' }}
+                                            </button>
+
+                                            <button v-if="props.activeType === 'FUTURES' && trade.exit_notes" 
+                                                @click="viewNote(trade.exit_notes, trade.status === 'CANCELLED' ? 'Cancel' : 'Close')" 
+                                                class="text-yellow-400 hover:text-yellow-300 underline focus:outline-none text-[10px]">
+                                                {{ trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note' }}
+                                            </button>
+
+                                            <span v-if="!trade.entry_notes && !trade.exit_notes && !trade.notes" class="text-gray-600">-</span>
+                                        </div>
+                                    </td>
+                                    
+                                    <td class="px-6 py-3 text-center">
+                                        <span class="px-2 py-1 text-[10px] font-bold rounded uppercase" 
+                                            :class="props.activeType === 'SPOT' ? 'bg-gray-800 text-gray-400' : (trade.status === 'OPEN' ? 'bg-blue-900/20 text-blue-400 border border-blue-500/20' : (trade.status === 'CANCELLED' ? 'bg-red-900/20 text-red-400 border border-red-500/20' : 'bg-gray-800 text-gray-400'))">
+                                            {{ props.activeType === 'SPOT' ? 'FILLED' : trade.status }}
+                                        </span>
+                                    </td>
+
+                                    <td class="px-6 py-3 text-center">
+                                        <button @click="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-2 rounded-full hover:bg-red-500/10" title="Delete Trade">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </td>
                                 </tr>
-                                <tr v-if="props.trades.length === 0"><td colspan="8" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
+                                <tr v-if="props.trades.length === 0"><td colspan="10" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -239,6 +308,68 @@ const formatCurrency = (value: number) => {
 
             </main>
             <Footer :is-sidebar-collapsed="isSidebarCollapsed" />
+
+            <div v-if="showDeleteModal" class="fixed inset-0 z-[50] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+                <div class="bg-[#121317] border border-[#1f2128] rounded-xl w-full max-w-md p-6 shadow-2xl relative">
+                    <div class="text-center mb-6">
+                        <div class="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </div>
+                        <h3 class="text-lg font-bold text-white mb-2">Delete Trade?</h3>
+                        <div class="bg-red-500/5 border border-red-500/10 rounded-lg p-4 text-left">
+                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">
+                                Notes, reflections, screenshots, cancel reasons, and all statistics will be <span class="text-red-400 font-bold">permanently removed after 30 days</span>.
+                            </p>
+                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">
+                                This data helps you learn from past trades.
+                            </p>
+                            <p class="text-xs text-blue-400 font-semibold cursor-pointer hover:underline flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                Consider exporting it first as a backup.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex gap-3">
+                        <button @click="cancelDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-gray-400 bg-[#1a1b20] hover:bg-[#25262c] border border-[#2d2f36] transition-all"> Cancel </button>
+                        <button @click="proceedDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900/20 transition-all"> Delete </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="showNoteModal" class="fixed inset-0 z-[50] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+                <div class="bg-[#121317] border border-[#1f2128] rounded-xl w-full max-w-lg p-6 shadow-2xl relative">
+                    <div class="flex justify-between items-center mb-4 border-b border-[#1f2128] pb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span class="text-yellow-500 font-bold text-xl mr-2">📝</span>
+                            {{ noteTitle }}
+                        </h3>
+                        <button @click="closeNoteModal" class="text-gray-500 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                    </div>
+                    <div class="bg-[#0a0b0d] p-4 rounded-lg border border-[#2d2f36] text-sm text-gray-300 whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto">{{ noteContent }}</div>
+                    <div class="mt-6 text-right">
+                        <button @click="closeNoteModal" class="px-6 py-2 rounded-lg text-xs font-bold text-black bg-white hover:bg-gray-200 transition-all">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="showImageModal" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" @click.self="closeImageModal">
+                <div class="bg-[#121317] border border-[#1f2128] rounded-xl w-full max-w-4xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                    <div class="flex justify-between items-center p-4 border-b border-[#1f2128] bg-[#1a1b20]">
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> Chart Preview
+                        </h3>
+                        <button @click="closeImageModal" class="text-gray-500 hover:text-white transition-colors p-1 rounded-full hover:bg-[#2d2f36]"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                    </div>
+                    <div class="flex-1 p-4 overflow-auto flex justify-center items-center bg-[#0a0b0d]">
+                        <img :src="selectedImageUrl" alt="Chart Screenshot" class="max-w-full max-h-[70vh] object-contain rounded-lg border border-[#2d2f36] shadow-lg" @error="selectedImageUrl = '/images/placeholder-chart.png'">
+                    </div>
+                    <div class="p-4 border-t border-[#1f2128] bg-[#1a1b20] flex justify-end gap-3">
+                         <button @click="closeImageModal" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-400 bg-transparent hover:bg-[#2d2f36] border border-transparent hover:border-[#2d2f36] transition-all">Close</button>
+                        <button @click="downloadImage" class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-900/20 transition-all"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download Image</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 </template>
@@ -246,4 +377,6 @@ const formatCurrency = (value: number) => {
 <style scoped>
 .no-spinner::-webkit-outer-spin-button, .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { appearance: textfield; -moz-appearance: textfield; }
+@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
 </style>

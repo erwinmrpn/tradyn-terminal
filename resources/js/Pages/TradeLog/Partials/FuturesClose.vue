@@ -12,9 +12,10 @@ const openTrades = computed(() => {
 });
 
 const expandedTradeId = ref<number | null>(null);
+const activeAction = ref<'CLOSE' | 'CANCEL' | null>(null);
 const isCompressing = ref(false);
 
-const form = useForm({
+const formClose = useForm({
     exit_date: new Date().toISOString().split('T')[0],
     exit_price: '',
     fee: 0,
@@ -23,17 +24,21 @@ const form = useForm({
     exit_screenshot: null as File | null,
 });
 
+const formCancel = useForm({
+    cancellation_note: '',
+});
+
 const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
 
 const estimatedPnL = computed(() => {
-    if (!expandedTradeId.value || !form.exit_price) return 0;
+    if (!expandedTradeId.value || !formClose.exit_price) return 0;
     const trade = openTrades.value.find(t => t.id === expandedTradeId.value);
     if (!trade) return 0;
 
-    const exit = parseFloat(form.exit_price);
+    const exit = parseFloat(formClose.exit_price);
     const entry = parseFloat(trade.entry_price);
     const qty = parseFloat(trade.quantity);
-    const fee = parseFloat(form.fee.toString()) || 0;
+    const fee = parseFloat(formClose.fee.toString()) || 0;
 
     let gross = 0;
     if (trade.type === 'LONG') {
@@ -51,17 +56,21 @@ const estimatedROE = computed(() => {
     return (estimatedPnL.value / parseFloat(trade.margin)) * 100;
 });
 
-const toggleExpand = (trade: any) => {
-    if (expandedTradeId.value === trade.id) {
+const toggleExpand = (trade: any, action: 'CLOSE' | 'CANCEL') => {
+    if (expandedTradeId.value === trade.id && activeAction.value === action) {
         expandedTradeId.value = null;
+        activeAction.value = null;
     } else {
         expandedTradeId.value = trade.id;
-        form.reset();
-        form.exit_date = new Date().toISOString().split('T')[0];
+        activeAction.value = action;
         
-        // [FIX] Format angka agar tidak pusing (hilangkan 0000 di belakang)
-        // parseFloat akan otomatis mengubah '100000.000000' menjadi 100000
-        form.exit_price = parseFloat(trade.entry_price).toString(); 
+        if (action === 'CLOSE') {
+            formClose.reset();
+            formClose.exit_date = new Date().toISOString().split('T')[0];
+            formClose.exit_price = parseFloat(trade.entry_price).toString(); 
+        } else {
+            formCancel.reset();
+        }
     }
 };
 
@@ -73,7 +82,7 @@ const handleFileChange = async (event: Event) => {
         try {
             isCompressing.value = true;
             const compressedFile = await imageCompression(file, options);
-            form.exit_screenshot = new File([compressedFile], file.name, { type: file.type });
+            formClose.exit_screenshot = new File([compressedFile], file.name, { type: file.type });
         } catch (error) {
             alert("Compression failed.");
         } finally {
@@ -86,14 +95,31 @@ const submitClose = () => {
     if (!expandedTradeId.value) return;
     if (isCompressing.value) { alert("Uploading image..."); return; }
 
-    form.post(route('trade.log.close', expandedTradeId.value), {
+    formClose.post(route('trade.log.close', expandedTradeId.value), {
         forceFormData: true,
         preserveScroll: true,
         onSuccess: () => {
             expandedTradeId.value = null;
-            form.reset();
+            activeAction.value = null;
+            formClose.reset();
         },
         onError: (e) => console.error(e)
+    });
+};
+
+const submitCancel = () => {
+    if (!expandedTradeId.value) return;
+    if (!formCancel.cancellation_note) {
+        alert("Please provide a reason for cancellation.");
+        return;
+    }
+    formCancel.post(route('trade.log.cancel', expandedTradeId.value), {
+        preserveScroll: true,
+        onSuccess: () => {
+            expandedTradeId.value = null;
+            activeAction.value = null;
+            formCancel.reset();
+        }
     });
 };
 </script>
@@ -129,35 +155,58 @@ const submitClose = () => {
                         </div>
                     </div>
 
+                    <div class="hidden lg:block text-center min-w-[140px]">
+                        <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">TP / SL</div>
+                        <div class="text-xs font-mono">
+                            <span :class="trade.tp_price ? 'text-green-400' : 'text-gray-600'">
+                                {{ trade.tp_price ? formatCurrency(trade.tp_price) : '-' }}
+                            </span>
+                            <span class="text-gray-600 mx-1">/</span>
+                            <span :class="trade.sl_price ? 'text-red-400' : 'text-gray-600'">
+                                {{ trade.sl_price ? formatCurrency(trade.sl_price) : '-' }}
+                            </span>
+                        </div>
+                    </div>
+
                     <div class="text-right hidden md:block">
-                        <div class="text-xs text-gray-500 uppercase">Margin</div>
+                        <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">Margin</div>
                         <div class="text-sm font-bold text-white">{{ formatCurrency(trade.margin) }}</div>
                     </div>
 
-                    <button 
-                        @click="toggleExpand(trade)"
-                        class="w-full md:w-auto px-4 py-2 text-xs font-bold uppercase rounded transition-all flex items-center justify-center gap-2"
-                        :class="expandedTradeId === trade.id ? 'bg-gray-700 text-white' : 'bg-yellow-600 hover:bg-yellow-500 text-black shadow-lg shadow-yellow-500/20'"
-                    >
-                        <span v-if="expandedTradeId === trade.id">Cancel</span>
-                        <span v-else>Close Position</span>
-                    </button>
+                    <div class="flex items-center gap-2 w-full md:w-auto">
+                        <button 
+                            @click="toggleExpand(trade, 'CANCEL')"
+                            class="px-4 py-2 text-xs font-bold uppercase rounded transition-all border border-red-900/30 hover:bg-red-900/20 text-red-500"
+                            :class="{'bg-red-900/30': expandedTradeId === trade.id && activeAction === 'CANCEL'}"
+                        >
+                            {{ (expandedTradeId === trade.id && activeAction === 'CANCEL') ? 'Cancel' : 'Cancel' }}
+                        </button>
+
+                        <button 
+                            @click="toggleExpand(trade, 'CLOSE')"
+                            class="px-4 py-2 text-xs font-bold uppercase rounded transition-all flex items-center justify-center gap-2"
+                            :class="(expandedTradeId === trade.id && activeAction === 'CLOSE') ? 'bg-gray-700 text-white' : 'bg-yellow-600 hover:bg-yellow-500 text-black shadow-lg shadow-yellow-500/20'"
+                        >
+                            {{ (expandedTradeId === trade.id && activeAction === 'CLOSE') ? 'Close' : 'Close Position' }}
+                        </button>
+                    </div>
                 </div>
 
                 <div v-if="expandedTradeId === trade.id" class="border-t border-[#1f2128] bg-[#1a1b20]/30 p-5 animate-fade-in-down">
-                    <form @submit.prevent="submitClose">
+                    
+                    <form v-if="activeAction === 'CLOSE'" @submit.prevent="submitClose">
                         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                             <div class="col-span-1 md:col-span-1">
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Price ($)</label>
-                                <input v-model="form.exit_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00" required>
+                                <input v-model="formClose.exit_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00" required>
                             </div>
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Total Fee ($)</label>
-                                <input v-model="form.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00">
+                                <input v-model="formClose.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00">
                             </div>
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Reason</label>
-                                <select v-model="form.exit_reason" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
+                                <select v-model="formClose.exit_reason" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
                                     <option value="Hit Take Profit (TP)">Hit Take Profit (TP)</option>
                                     <option value="Hit Stop Loss (SL)">Hit Stop Loss (SL)</option>
                                     <option value="Manual Profit">Manual Close (Profit)</option>
@@ -170,7 +219,7 @@ const submitClose = () => {
                             </div>
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Date</label>
-                                <input v-model="form.exit_date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
+                                <input v-model="formClose.exit_date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
                             </div>
                         </div>
 
@@ -192,23 +241,47 @@ const submitClose = () => {
                         <div class="grid grid-cols-4 gap-3 mb-4">
                             <div class="col-span-3">
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Lesson / Reflection</label>
-                                <input v-model="form.notes" type="text" placeholder="Why did I close here?" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-sm rounded p-2.5 focus:border-yellow-500 outline-none">
+                                <input v-model="formClose.notes" type="text" placeholder="Why did I close here?" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-sm rounded p-2.5 focus:border-yellow-500 outline-none">
                             </div>
                             <div class="col-span-1 relative">
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Chart</label>
                                 <label class="flex items-center justify-center w-full h-[40px] bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer hover:border-gray-500 text-gray-400 text-xs overflow-hidden">
                                     <span v-if="isCompressing" class="animate-pulse text-yellow-500">...</span>
-                                    <span v-else-if="form.exit_screenshot" class="text-blue-400 truncate px-1">{{ form.exit_screenshot.name }}</span>
+                                    <span v-else-if="formClose.exit_screenshot" class="text-blue-400 truncate px-1">{{ formClose.exit_screenshot.name }}</span>
                                     <span v-else>+ Upload</span>
                                     <input type="file" @change="handleFileChange" accept="image/*" class="hidden">
                                 </label>
                             </div>
                         </div>
 
-                        <button type="submit" :disabled="form.processing || isCompressing" class="w-full py-3 rounded text-sm font-black bg-yellow-600 hover:bg-yellow-500 text-black uppercase tracking-wider shadow-lg transition-all">
+                        <button type="submit" :disabled="formClose.processing || isCompressing" class="w-full py-3 rounded text-sm font-black bg-yellow-600 hover:bg-yellow-500 text-black uppercase tracking-wider shadow-lg transition-all">
                             CONFIRM CLOSE
                         </button>
                     </form>
+
+                    <form v-if="activeAction === 'CANCEL'" @submit.prevent="submitCancel">
+                        <div class="bg-red-900/10 border border-red-900/30 rounded p-4 mb-4">
+                            <p class="text-red-400 text-xs font-bold uppercase mb-1 flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                Warning: Cancelling Trade
+                            </p>
+                            <p class="text-gray-400 text-xs leading-relaxed">
+                                This action will <strong>VOID</strong> the trade. <br>
+                                The full margin <strong>({{ formatCurrency(Number(trade.margin)) }})</strong> will be returned to your balance. <br>
+                                No PnL will be recorded.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Reason for Cancellation</label>
+                            <input v-model="formCancel.cancellation_note" type="text" placeholder="e.g. Wrong entry price, accidental click, order rejected..." class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-3 focus:border-red-500 outline-none" required>
+                        </div>
+
+                        <button type="submit" :disabled="formCancel.processing" class="w-full py-3 rounded text-sm font-bold bg-red-600 hover:bg-red-500 text-white uppercase tracking-wider shadow-lg transition-all">
+                            CONFIRM CANCEL
+                        </button>
+                    </form>
+
                 </div>
             </div>
         </div>

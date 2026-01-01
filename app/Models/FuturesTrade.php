@@ -26,7 +26,7 @@ class FuturesTrade extends Model
         'tp_price',
         'sl_price',
         'entry_screenshot',
-        'notes',
+        'entry_notes',
         'status',         // OPEN / CLOSED
 
         // --- CLOSE POSITION FIELDS ---
@@ -35,6 +35,7 @@ class FuturesTrade extends Model
         'fee',             // Fee saat close
         'exit_reason',     // Reason (Hit TP/SL/Manual)
         'exit_screenshot', // Gambar chart saat close
+        'exit_notes',
         'pnl',             // Profit/Loss bersih
     ];
 

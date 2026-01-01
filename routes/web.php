@@ -66,6 +66,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 9. Close Position
     Route::post('/trade-log/close/{id}', [TradeLogController::class, 'closePosition'])->name('trade.log.close');
 
+    // 10. cancel position
+    Route::post('/trade-log/cancel/{id}', [TradeLogController::class, 'cancelPosition'])->name('trade.log.cancel');
+
+    // 11. Delete history trade
+
+    Route::delete('/trade-log/{id}', [TradeLogController::class, 'destroy'])->name('trade.log.destroy');
+
 });
 
 require __DIR__.'/auth.php';
