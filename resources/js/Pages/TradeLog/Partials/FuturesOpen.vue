@@ -1,29 +1,25 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { ref, computed, watch } from 'vue';
+import { ref, watch } from 'vue';
 import imageCompression from 'browser-image-compression';
 
 const props = defineProps<{
     accounts: any[];
 }>();
 
-// Helper Jam saat ini (HH:mm)
 const getCurrentTime = () => {
     const now = new Date();
     return now.toTimeString().slice(0, 5);
 };
 
 const isCompressing = ref(false);
-const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); // Input dalam Koin atau USD
+const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
 const dynamicInput = ref(''); 
 
 const form = useForm({
     trading_account_id: props.accounts.length > 0 ? props.accounts[0].id : '',
-    
-    // [UPDATE] Date & Time Terpisah
     date: new Date().toISOString().split('T')[0],
     time: getCurrentTime(),
-
     symbol: '',
     market_type: 'CRYPTO',
     type: 'LONG',
@@ -35,22 +31,29 @@ const form = useForm({
     total: '',    
     tp_price: '',
     sl_price: '',
-    notes: '', // Ini masuk entry_notes
+    notes: '', 
     screenshot: null as File | null,
     form_type: 'FUTURES'
 });
 
-// Auto-calc Quantity/Total
-watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) => {
-    const price = parseFloat(newPrice as string) || 0;
-    const inputVal = parseFloat(newVal as string) || 0;
+// [FIXED] Watcher Logic: Menangani tipe data 'number' atau 'string' dengan aman
+watch([() => form.price, dynamicInput, inputMode, () => form.leverage], ([newPrice, newVal, mode, newLev]) => {
+    // Konversi aman ke Float
+    const price = parseFloat(String(newPrice)) || 0;
+    const inputVal = parseFloat(String(newVal)) || 0;
+    const lev = parseFloat(String(newLev)) || 1; // Default lev 1
+
     if (price > 0 && inputVal > 0) {
         if (mode === 'ASSET') {
+            // Input: QTY (Coin) -> Hitung Margin ($)
+            // Rumus: (Price * Qty) / Leverage
             form.quantity = inputVal.toString();
-            form.total = (price * inputVal / form.leverage).toFixed(2); // Estimasi Margin
+            form.total = ((price * inputVal) / lev).toFixed(2); 
         } else {
+            // Input: MARGIN ($) -> Hitung Qty (Coin)
+            // Rumus: (Margin * Leverage) / Price
             form.total = inputVal.toString();
-            form.quantity = (inputVal * form.leverage / price).toFixed(8);
+            form.quantity = ((inputVal * lev) / price).toFixed(8);
         }
     } else {
         form.quantity = '';
@@ -81,9 +84,8 @@ const submit = () => {
         forceFormData: true,
         onSuccess: () => {
             form.reset('symbol', 'price', 'quantity', 'total', 'tp_price', 'sl_price', 'notes', 'screenshot');
-            form.time = getCurrentTime(); // Reset jam ke sekarang
-            dynamicInput.value = '';
-            // Reset file input manual
+            form.time = getCurrentTime(); 
+            dynamicInput.value = ''; 
             const fileInput = document.getElementById('file-upload-futures') as HTMLInputElement;
             if(fileInput) fileInput.value = '';
         },
@@ -93,145 +95,184 @@ const submit = () => {
 </script>
 
 <template>
-    <form @submit.prevent="submit" class="bg-[#121317] border border-[#1f2128] rounded-xl p-6 shadow-sm relative overflow-hidden animate-fade-in-down">
+    <form @submit.prevent="submit" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-lg animate-fade-in-down">
         
-        <div class="flex justify-between items-start mb-6">
-            <div>
-                <h3 class="text-lg font-bold text-white">Open Futures Position</h3>
-                <p class="text-xs text-gray-500 mt-1">Entry new trade manually.</p>
-            </div>
-            <div class="bg-[#0a0b0d] p-1 rounded-lg flex border border-[#2d2f36]">
-                <button type="button" @click="form.type = 'LONG'" class="px-6 py-1.5 rounded text-xs font-bold transition-all" :class="form.type === 'LONG' ? 'bg-green-600 text-white shadow-lg shadow-green-900/20' : 'text-gray-500 hover:text-gray-300'">LONG</button>
-                <button type="button" @click="form.type = 'SHORT'" class="px-6 py-1.5 rounded text-xs font-bold transition-all" :class="form.type === 'SHORT' ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' : 'text-gray-500 hover:text-gray-300'">SHORT</button>
-            </div>
+        <div class="px-6 py-3 border-b border-[#1f2128] bg-[#1a1b20] flex justify-between items-center">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full" :class="form.type === 'LONG' ? 'bg-green-500' : 'bg-red-500'"></span> 
+                New {{ form.type }} Entry
+            </h3>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="p-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             <div class="lg:col-span-8 space-y-4">
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Date</label>
-                            <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Time</label>
-                            <input v-model="form.time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none">
-                        </div>
+                <div class="grid grid-cols-12 gap-3">
+                    <div class="col-span-4 md:col-span-3">
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Symbol</label>
+                        <input v-model="form.symbol" type="text" placeholder="BTC" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-lg font-black rounded-lg py-2 px-3 focus:border-blue-500 outline-none uppercase placeholder-gray-700">
                     </div>
 
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Account</label>
-                        <select v-model="form.trading_account_id" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none">
-                            <option v-for="acc in props.accounts" :key="acc.id" :value="acc.id">{{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}</option>
-                        </select>
+                    <div class="col-span-4 md:col-span-3">
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Market</label>
+                        <div class="relative">
+                            <select v-model="form.market_type" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs font-bold rounded-lg h-[46px] px-2 focus:border-blue-500 outline-none cursor-pointer uppercase appearance-none">
+                                <option value="CRYPTO">Crypto</option>
+                                <option value="FOREX">Forex</option>
+                                <option value="STOCKS">Stocks</option>
+                            </select>
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-span-4 md:col-span-6">
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Position</label>
+                        <div class="flex bg-[#0a0b0d] p-1 rounded-lg border border-[#2d2f36] h-[46px]">
+                            <button type="button" @click="form.type = 'LONG'" class="flex-1 rounded-md text-xs font-black transition-all tracking-wider" :class="form.type === 'LONG' ? 'bg-green-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300 hover:bg-[#1f2128]'">LONG</button>
+                            <button type="button" @click="form.type = 'SHORT'" class="flex-1 rounded-md text-xs font-black transition-all tracking-wider" :class="form.type === 'SHORT' ? 'bg-red-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300 hover:bg-[#1f2128]'">SHORT</button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Asset / Symbol</label>
-                        <input v-model="form.symbol" type="text" placeholder="BTC" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none uppercase font-bold">
+                <div class="flex gap-2 p-2 bg-[#0a0b0d] rounded-lg border border-[#2d2f36] items-center">
+                    <div class="flex-1 flex flex-col px-2">
+                        <label class="text-[8px] text-gray-500 font-bold uppercase">Leverage</label>
+                        <div class="flex items-center">
+                            <span class="text-[10px] text-yellow-500 mr-1 font-bold">x</span>
+                            <input v-model="form.leverage" type="number" class="w-full bg-transparent border-none text-white text-xs p-0 focus:ring-0 font-bold h-4 no-spinner" placeholder="10">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Market Type</label>
-                        <select v-model="form.market_type" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none">
-                            <option value="CRYPTO">Crypto</option>
-                            <option value="FOREX">Forex</option>
-                            <option value="STOCKS">Stocks</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-3 gap-4">
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Lev (x)</label>
-                        <input v-model="form.leverage" type="number" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Mode</label>
-                        <select v-model="form.margin_mode" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none">
+                    <div class="w-px h-6 bg-[#2d2f36]"></div>
+                    <div class="flex-1 flex flex-col px-2">
+                        <label class="text-[8px] text-gray-500 font-bold uppercase">Margin</label>
+                        <select v-model="form.margin_mode" class="w-full bg-transparent border-none text-white text-xs p-0 focus:ring-0 cursor-pointer font-semibold h-4">
                             <option value="CROSS">Cross</option>
                             <option value="ISOLATED">Isolated</option>
                         </select>
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Order</label>
-                        <select v-model="form.order_type" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-blue-500 outline-none">
+                    <div class="w-px h-6 bg-[#2d2f36]"></div>
+                    <div class="flex-1 flex flex-col px-2">
+                        <label class="text-[8px] text-gray-500 font-bold uppercase">Order</label>
+                        <select v-model="form.order_type" class="w-full bg-transparent border-none text-white text-xs p-0 focus:ring-0 cursor-pointer font-semibold h-4">
                             <option value="MARKET">Market</option>
                             <option value="LIMIT">Limit</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Entry Price ($)</label>
-                        <input v-model="form.price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none font-mono" placeholder="0.00">
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Entry Price ($)</label>
+                        <input v-model="form.price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono no-spinner" placeholder="0.00">
                     </div>
                     <div>
                         <div class="flex justify-between mb-1">
-                            <label class="block text-[10px] text-gray-500 font-bold uppercase">Size</label>
-                            <button type="button" @click="inputMode = inputMode === 'ASSET' ? 'TOTAL' : 'ASSET'" class="text-[9px] text-blue-400 hover:underline uppercase font-bold">
-                                Switch to {{ inputMode === 'ASSET' ? 'Margin ($)' : 'Qty (Coin)' }}
+                            <label class="block text-[9px] text-gray-500 font-bold uppercase tracking-wider">Position Size</label>
+                            <button type="button" @click="inputMode = inputMode === 'ASSET' ? 'TOTAL' : 'ASSET'" class="text-[8px] text-blue-400 hover:text-blue-300 uppercase font-bold tracking-wide">
+                                {{ inputMode === 'ASSET' ? 'SWITCH TO USD' : 'SWITCH TO COIN' }}
                             </button>
                         </div>
                         <div class="relative">
-                            <input v-model="dynamicInput" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-blue-500 outline-none font-mono" :placeholder="inputMode === 'ASSET' ? 'Qty (e.g 0.1)' : 'Margin (e.g 100)'">
-                            <span class="absolute right-3 top-2.5 text-xs text-gray-500 font-bold">{{ inputMode === 'ASSET' ? 'COIN' : 'USD' }}</span>
+                            <input v-model="dynamicInput" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono no-spinner" :placeholder="inputMode === 'ASSET' ? 'Qty' : 'Margin $'">
+                            <span class="absolute right-3 top-3 text-[10px] text-gray-500 font-bold">{{ inputMode === 'ASSET' ? form.symbol || 'COIN' : 'USD' }}</span>
                         </div>
-                        <div class="text-[10px] text-gray-600 mt-1 text-right">
-                            {{ inputMode === 'ASSET' ? `Est. Margin: $${form.total}` : `Est. Qty: ${form.quantity}` }}
+                        
+                        <div class="flex justify-between mt-1 px-1">
+                            <span class="text-[9px] text-gray-600">
+                                Total Pos: ${{ form.price && form.quantity ? (parseFloat(String(form.price)) * parseFloat(String(form.quantity))).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0' }}
+                            </span>
+                            <span class="text-[9px] text-gray-400 font-mono">
+                                {{ inputMode === 'ASSET' ? `Est. Margin: $${form.total}` : `Est. Qty: ${form.quantity}` }}
+                            </span>
                         </div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 border-t border-[#1f2128] pt-4 border-dashed">
-                    <div>
-                        <label class="block text-[10px] text-green-500 mb-1 font-bold uppercase">Take Profit</label>
-                        <input v-model="form.tp_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-green-500 outline-none placeholder-gray-700" placeholder="Optional">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="relative">
+                        <label class="block text-[9px] text-green-500 mb-1 font-bold uppercase tracking-wider">Take Profit</label>
+                        <input v-model="form.tp_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-green-500 outline-none placeholder-gray-700 font-mono no-spinner" placeholder="Optional">
                     </div>
-                    <div>
-                        <label class="block text-[10px] text-red-500 mb-1 font-bold uppercase">Stop Loss</label>
-                        <input v-model="form.sl_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 focus:border-red-500 outline-none placeholder-gray-700" placeholder="Optional">
+                    <div class="relative">
+                        <label class="block text-[9px] text-red-500 mb-1 font-bold uppercase tracking-wider">Stop Loss</label>
+                        <input v-model="form.sl_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-red-500 outline-none placeholder-gray-700 font-mono no-spinner" placeholder="Optional">
                     </div>
                 </div>
 
             </div>
 
-            <div class="lg:col-span-4 flex flex-col gap-4">
+            <div class="lg:col-span-4 flex flex-col gap-4 border-l border-[#1f2128] pl-0 lg:pl-6">
                 
-                <div class="flex-1">
-                    <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Entry Chart</label>
-                    <div class="border-2 border-dashed border-[#2d2f36] rounded-xl h-full min-h-[150px] flex flex-col justify-center items-center relative hover:border-gray-500 transition-colors bg-[#0a0b0d]">
-                        <input id="file-upload-futures" type="file" @change="handleFileChange" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-                        <div v-if="!form.screenshot" class="text-center p-4">
-                            <i class="fas fa-image text-2xl text-gray-600 mb-2"></i>
-                            <p class="text-xs text-gray-500 font-bold">Click or Drop Chart</p>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Trading Account</label>
+                        <div class="relative">
+                            <select v-model="form.trading_account_id" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none appearance-none">
+                                <option v-for="acc in props.accounts" :key="acc.id" :value="acc.id">{{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}</option>
+                            </select>
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                            </div>
                         </div>
-                        <div v-else class="text-center p-4">
-                            <span class="text-green-500 text-xs font-bold block mb-1">Image Selected</span>
-                            <span class="text-gray-500 text-[10px] truncate max-w-[150px] block">{{ form.screenshot.name }}</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="flex-1">
+                            <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Date</label>
+                            <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none">
                         </div>
-                        <div v-if="isCompressing" class="absolute inset-0 bg-black/50 flex items-center justify-center">
-                            <span class="text-xs font-bold text-white animate-pulse">Compressing...</span>
+                        <div class="w-1/3">
+                            <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Time</label>
+                            <input v-model="form.time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none">
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Setup Reasoning</label>
-                    <textarea v-model="form.notes" rows="4" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded-lg p-3 focus:border-blue-500 outline-none resize-none" placeholder="Why did you take this trade?"></textarea>
+                    <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Entry Chart</label>
+                    <div class="border border-dashed border-[#2d2f36] rounded-lg flex items-center justify-between px-3 py-2.5 relative hover:border-gray-500 transition-colors bg-[#0a0b0d] group">
+                        <input id="file-upload-futures" type="file" @change="handleFileChange" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-[#1f2128] p-1.5 rounded">
+                                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-[10px] font-bold text-gray-300 group-hover:text-white transition-colors">
+                                    {{ form.screenshot ? 'Change Image' : 'Upload Screenshot' }}
+                                </span>
+                                <span v-if="form.screenshot" class="text-[9px] text-green-500 truncate max-w-[120px]">{{ form.screenshot.name }}</span>
+                                <span v-else class="text-[9px] text-gray-600">No file selected</span>
+                            </div>
+                        </div>
+                        <div v-if="isCompressing" class="text-[9px] text-blue-400 animate-pulse font-bold">Compressing...</div>
+                    </div>
                 </div>
 
-                <button type="submit" :disabled="form.processing || isCompressing" class="w-full py-3 rounded-lg text-sm font-black uppercase tracking-wider transition-all shadow-lg"
+                <div class="flex-1">
+                    <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Notes / Setup</label>
+                    <textarea v-model="form.notes" class="w-full h-full min-h-[80px] bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded-lg p-3 focus:border-blue-500 outline-none resize-none" placeholder="Reason for entry..."></textarea>
+                </div>
+
+                <button type="submit" :disabled="form.processing || isCompressing" class="w-full py-3 rounded-lg text-sm font-black uppercase tracking-wider transition-all shadow-lg transform active:scale-95 border border-transparent hover:border-white/10"
                     :class="form.type === 'LONG' ? 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/20' : 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20'">
-                    {{ form.processing ? 'Opening...' : `OPEN ${form.type} POSITION` }}
+                    {{ form.processing ? 'Executing...' : `OPEN ${form.type}` }}
                 </button>
 
             </div>
         </div>
     </form>
 </template>
+
+<style scoped>
+/* HILANGKAN TOMBOL PANAH ATAS BAWAH DI INPUT NUMBER */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield; /* Firefox */
+}
+</style>
