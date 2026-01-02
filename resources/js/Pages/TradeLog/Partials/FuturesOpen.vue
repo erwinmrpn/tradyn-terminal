@@ -266,13 +266,14 @@ const submit = () => {
 </template>
 
 <style scoped>
-/* HILANGKAN TOMBOL PANAH ATAS BAWAH DI INPUT NUMBER */
+/* [FIXED] Hilangkan tombol panah di input number tanpa warning CSS */
+.no-spinner {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
 .no-spinner::-webkit-outer-spin-button,
 .no-spinner::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
-}
-.no-spinner {
-  -moz-appearance: textfield; /* Firefox */
 }
 </style>
