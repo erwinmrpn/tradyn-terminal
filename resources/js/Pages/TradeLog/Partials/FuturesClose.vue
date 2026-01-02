@@ -7,16 +7,31 @@ const props = defineProps<{
     trades: any[]; 
 }>();
 
+// Filter & Sort Open Trades
+// Menggunakan entry_date + entry_time untuk sort
 const openTrades = computed(() => {
-    return props.trades.filter(t => t.status === 'OPEN').sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime());
+    return props.trades
+        .filter(t => t.status === 'OPEN')
+        .sort((a, b) => {
+            const dateA = new Date(a.entry_date + 'T' + a.entry_time).getTime();
+            const dateB = new Date(b.entry_date + 'T' + b.entry_time).getTime();
+            return dateB - dateA; // Newest first
+        });
 });
 
 const expandedTradeId = ref<number | null>(null);
 const activeAction = ref<'CLOSE' | 'CANCEL' | null>(null);
 const isCompressing = ref(false);
 
+// Helper Jam
+const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
+
+// Form Close
 const formClose = useForm({
+    // [UPDATE] Split Date & Time
     exit_date: new Date().toISOString().split('T')[0],
+    exit_time: getCurrentTime(),
+    
     exit_price: '',
     fee: 0,
     exit_reason: 'Hit Take Profit (TP)',
@@ -24,6 +39,7 @@ const formClose = useForm({
     exit_screenshot: null as File | null,
 });
 
+// Form Cancel
 const formCancel = useForm({
     cancellation_note: '',
 });
@@ -67,6 +83,7 @@ const toggleExpand = (trade: any, action: 'CLOSE' | 'CANCEL') => {
         if (action === 'CLOSE') {
             formClose.reset();
             formClose.exit_date = new Date().toISOString().split('T')[0];
+            formClose.exit_time = getCurrentTime(); // Reset Time to now
             formClose.exit_price = parseFloat(trade.entry_price).toString(); 
         } else {
             formCancel.reset();
@@ -137,34 +154,28 @@ const submitCancel = () => {
                 
                 <div class="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div class="flex items-center gap-4 w-full md:w-auto">
-                        
                         <div class="px-3 py-1.5 rounded text-[10px] font-black uppercase border tracking-wider"
                             :class="trade.type === 'LONG' ? 'bg-green-900/10 text-green-500 border-green-500/20' : 'bg-red-900/10 text-red-500 border-red-500/20'">
                             {{ trade.type }}
                         </div>
-
                         <div>
                             <div class="font-bold text-white flex items-center gap-2">
                                 {{ trade.symbol }} 
                                 <span class="text-[10px] text-gray-500 bg-[#1f2128] px-1.5 rounded">{{ trade.leverage }}x</span>
-                                <span class="text-[10px] text-blue-400 bg-blue-500/10 border border-blue-500/20 px-1.5 rounded ml-1">
-                                    {{ trade.trading_account ? trade.trading_account.name : 'Unknown' }}
-                                </span>
+                                <span class="text-[10px] text-blue-400 bg-blue-500/10 border border-blue-500/20 px-1.5 rounded ml-1">{{ trade.trading_account ? trade.trading_account.name : 'Unknown' }}</span>
                             </div>
-                            <div class="text-xs text-gray-500">{{ trade.entry_date }} &bull; Entry: {{ formatCurrency(trade.entry_price) }}</div>
+                            <div class="text-xs text-gray-500">
+                                {{ trade.entry_date }} <span class="text-[10px] opacity-70">{{ trade.entry_time.slice(0,5) }}</span> &bull; Entry: {{ formatCurrency(trade.entry_price) }}
+                            </div>
                         </div>
                     </div>
 
                     <div class="hidden lg:block text-center min-w-[140px]">
                         <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">TP / SL</div>
                         <div class="text-xs font-mono">
-                            <span :class="trade.tp_price ? 'text-green-400' : 'text-gray-600'">
-                                {{ trade.tp_price ? formatCurrency(trade.tp_price) : '-' }}
-                            </span>
+                            <span :class="trade.tp_price ? 'text-green-400' : 'text-gray-600'">{{ trade.tp_price ? formatCurrency(trade.tp_price) : '-' }}</span>
                             <span class="text-gray-600 mx-1">/</span>
-                            <span :class="trade.sl_price ? 'text-red-400' : 'text-gray-600'">
-                                {{ trade.sl_price ? formatCurrency(trade.sl_price) : '-' }}
-                            </span>
+                            <span :class="trade.sl_price ? 'text-red-400' : 'text-gray-600'">{{ trade.sl_price ? formatCurrency(trade.sl_price) : '-' }}</span>
                         </div>
                     </div>
 
@@ -174,19 +185,10 @@ const submitCancel = () => {
                     </div>
 
                     <div class="flex items-center gap-2 w-full md:w-auto">
-                        <button 
-                            @click="toggleExpand(trade, 'CANCEL')"
-                            class="px-4 py-2 text-xs font-bold uppercase rounded transition-all border border-red-900/30 hover:bg-red-900/20 text-red-500"
-                            :class="{'bg-red-900/30': expandedTradeId === trade.id && activeAction === 'CANCEL'}"
-                        >
+                        <button @click="toggleExpand(trade, 'CANCEL')" class="px-4 py-2 text-xs font-bold uppercase rounded transition-all border border-red-900/30 hover:bg-red-900/20 text-red-500" :class="{'bg-red-900/30': expandedTradeId === trade.id && activeAction === 'CANCEL'}">
                             {{ (expandedTradeId === trade.id && activeAction === 'CANCEL') ? 'Cancel' : 'Cancel' }}
                         </button>
-
-                        <button 
-                            @click="toggleExpand(trade, 'CLOSE')"
-                            class="px-4 py-2 text-xs font-bold uppercase rounded transition-all flex items-center justify-center gap-2"
-                            :class="(expandedTradeId === trade.id && activeAction === 'CLOSE') ? 'bg-gray-700 text-white' : 'bg-yellow-600 hover:bg-yellow-500 text-black shadow-lg shadow-yellow-500/20'"
-                        >
+                        <button @click="toggleExpand(trade, 'CLOSE')" class="px-4 py-2 text-xs font-bold uppercase rounded transition-all flex items-center justify-center gap-2" :class="(expandedTradeId === trade.id && activeAction === 'CLOSE') ? 'bg-gray-700 text-white' : 'bg-yellow-600 hover:bg-yellow-500 text-black shadow-lg shadow-yellow-500/20'">
                             {{ (expandedTradeId === trade.id && activeAction === 'CLOSE') ? 'Close' : 'Close Position' }}
                         </button>
                     </div>
@@ -200,10 +202,15 @@ const submitCancel = () => {
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Price ($)</label>
                                 <input v-model="formClose.exit_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00" required>
                             </div>
-                            <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Total Fee ($)</label>
-                                <input v-model="formClose.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00">
+                            
+                            <div class="col-span-1">
+                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Date & Time</label>
+                                <div class="flex gap-2">
+                                    <input v-model="formClose.exit_date" type="date" class="w-2/3 bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
+                                    <input v-model="formClose.exit_time" type="time" class="w-1/3 bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
+                                </div>
                             </div>
+
                             <div>
                                 <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Reason</label>
                                 <select v-model="formClose.exit_reason" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
@@ -218,8 +225,8 @@ const submitCancel = () => {
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Date</label>
-                                <input v-model="formClose.exit_date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded p-2.5 focus:border-yellow-500 outline-none">
+                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Total Fee ($)</label>
+                                <input v-model="formClose.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-2.5 font-mono focus:border-yellow-500 outline-none" placeholder="0.00">
                             </div>
                         </div>
 
@@ -266,17 +273,13 @@ const submitCancel = () => {
                                 Warning: Cancelling Trade
                             </p>
                             <p class="text-gray-400 text-xs leading-relaxed">
-                                This action will <strong>VOID</strong> the trade. <br>
-                                The full margin <strong>({{ formatCurrency(Number(trade.margin)) }})</strong> will be returned to your balance. <br>
-                                No PnL will be recorded.
+                                This action will <strong>VOID</strong> the trade. No PnL will be recorded.
                             </p>
                         </div>
-
                         <div class="mb-4">
                             <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Reason for Cancellation</label>
-                            <input v-model="formCancel.cancellation_note" type="text" placeholder="e.g. Wrong entry price, accidental click, order rejected..." class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-3 focus:border-red-500 outline-none" required>
+                            <input v-model="formCancel.cancellation_note" type="text" placeholder="e.g. Wrong entry price, accidental click..." class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded p-3 focus:border-red-500 outline-none" required>
                         </div>
-
                         <button type="submit" :disabled="formCancel.processing" class="w-full py-3 rounded text-sm font-bold bg-red-600 hover:bg-red-500 text-white uppercase tracking-wider shadow-lg transition-all">
                             CONFIRM CANCEL
                         </button>

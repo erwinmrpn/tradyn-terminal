@@ -1,11 +1,18 @@
 <script setup lang="ts">
-// Terima props 'activeTab' dari Index.vue
-defineProps<{
+import { defineAsyncComponent } from 'vue';
+
+// Import Komponen dari folder ResultPartials
+import ResultFutures from './ResultPartials/ResultFutures.vue';
+import ResultSpot from './ResultPartials/ResultSpot.vue';
+
+// 1. Terima Props 'activeTab' dan 'trades' dari Index.vue
+const props = defineProps<{
     activeTab: 'SPOT' | 'FUTURES';
+    trades: any[]; 
 }>();
 
-// Emit event update ke Index.vue saat tombol diklik
-defineEmits(['update:activeTab']);
+// 2. Definisi Event agar bisa mengubah state di Index.vue
+const emit = defineEmits(['update:activeTab']);
 </script>
 
 <template>
@@ -34,18 +41,16 @@ defineEmits(['update:activeTab']);
             </div>
         </div>
 
-        <div class="bg-[#121317] border border-[#1f2128] rounded-xl p-8 shadow-lg min-h-[300px] flex flex-col items-center justify-center text-gray-500">
-            <div v-if="activeTab === 'SPOT'" class="text-center">
-                <i class="fas fa-coins text-4xl mb-4 text-emerald-600"></i>
-                <h3 class="text-lg font-bold text-gray-300">Spot Trade History</h3>
-                <p class="text-xs mt-2">Menampilkan hasil trading Spot yang sudah selesai.</p>
+        <div class="min-h-[300px]">
+            
+            <div v-if="activeTab === 'FUTURES'">
+                <ResultFutures :trades="props.trades" />
             </div>
 
-            <div v-if="activeTab === 'FUTURES'" class="text-center">
-                <i class="fas fa-chart-area text-4xl mb-4 text-blue-600"></i>
-                <h3 class="text-lg font-bold text-gray-300">Futures Trade History</h3>
-                <p class="text-xs mt-2">Menampilkan posisi Futures yang sudah CLOSED.</p>
+            <div v-if="activeTab === 'SPOT'">
+                <ResultSpot :trades="props.trades" />
             </div>
+
         </div>
 
     </div>

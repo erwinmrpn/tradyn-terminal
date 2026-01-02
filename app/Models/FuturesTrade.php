@@ -11,32 +11,37 @@ class FuturesTrade extends Model
     use HasFactory;
 
     protected $fillable = [
-        // --- OPEN POSITION FIELDS ---
         'trading_account_id',
         'symbol',
         'market_type',
-        'entry_date',
-        'type',           // LONG / SHORT
-        'leverage',       // 1x - 125x
-        'margin_mode',    // CROSS / ISOLATED
-        'order_type',     // MARKET / LIMIT
+        
+        // [UPDATE] Kolom Terpisah
+        'entry_date', 
+        'entry_time',
+        
+        'type',
+        'leverage',
+        'margin_mode',
+        'order_type',
         'entry_price',
-        'quantity',       // Size koin
-        'margin',         // Modal (Cost)
+        'quantity',
+        'margin',
         'tp_price',
         'sl_price',
         'entry_screenshot',
         'entry_notes',
-        'status',         // OPEN / CLOSED
+        'status',
 
-        // --- CLOSE POSITION FIELDS ---
+        // [UPDATE] Kolom Terpisah
         'exit_date',
+        'exit_time',
+        
         'exit_price',
-        'fee',             // Fee saat close
-        'exit_reason',     // Reason (Hit TP/SL/Manual)
-        'exit_screenshot', // Gambar chart saat close
+        'fee',
+        'exit_reason',
+        'exit_screenshot',
         'exit_notes',
-        'pnl',             // Profit/Loss bersih
+        'pnl',
     ];
 
     /**

@@ -18,7 +18,7 @@ class TradeLogController extends Controller
         $user = Auth::user();
 
         if ($type === 'FUTURES') {
-            $query = FuturesTrade::query(); // Ambil semua (Open/Closed/Cancelled)
+            $query = FuturesTrade::query();
         } elseif ($type === 'RESULT') {
             $query = FuturesTrade::query()->where('status', 'CLOSED');
         } else {
@@ -33,6 +33,7 @@ class TradeLogController extends Controller
             });
         }
 
+        // [UPDATE] Gunakan exit_datetime / entry_datetime untuk sorting
         $sortField = ($type === 'SPOT') ? 'date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
         $trades = $query->with('tradingAccount')->latest($sortField)->get();
         $accounts = $user->tradingAccounts;
@@ -56,6 +57,7 @@ class TradeLogController extends Controller
     public function store(Request $request)
     {
         $request->validate(['form_type' => 'required|in:SPOT,FUTURES']);
+
         $screenshotPath = null;
         if ($request->hasFile('screenshot')) {
             $request->validate(['screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120']);
@@ -63,9 +65,11 @@ class TradeLogController extends Controller
         }
 
         if ($request->form_type === 'FUTURES') {
+            
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
-                'date' => 'required|date',
+                'date' => 'required|date', // Input form tetap 'date', tapi disimpan ke datetime
+                'time' => 'required',
                 'type' => 'required|in:LONG,SHORT',
                 'symbol' => 'required|string',
                 'market_type' => 'required|string',
@@ -88,7 +92,10 @@ class TradeLogController extends Controller
 
             FuturesTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
+                
                 'entry_date' => $validated['date'],
+                'entry_time' => $validated['time'],
+                
                 'type' => $validated['type'],
                 'symbol' => strtoupper($validated['symbol']),
                 'market_type' => $validated['market_type'],
@@ -101,14 +108,13 @@ class TradeLogController extends Controller
                 'tp_price' => $validated['tp_price'],
                 'sl_price' => $validated['sl_price'],
                 'entry_screenshot' => $screenshotPath, 
-                // [UPDATE] Simpan ke entry_notes
                 'entry_notes' => $validated['notes'],
                 'status' => 'OPEN'
             ]);
 
             return redirect()->back()->with('success', 'Futures position opened!');
         } else {
-            // ... Logic Spot Trade (Tidak berubah, tetap pakai 'notes') ...
+            // ... Logic Spot (Tidak berubah) ...
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
                 'symbol' => 'required|string|uppercase',
@@ -157,10 +163,11 @@ class TradeLogController extends Controller
 
         $validated = $request->validate([
             'exit_date' => 'required|date',
+            'exit_time' => 'required',
             'exit_price' => 'required|numeric|min:0',
             'fee' => 'required|numeric|min:0',
             'exit_reason' => 'required|string',
-            'notes' => 'nullable|string', // Ini nanti masuk ke exit_notes
+            'notes' => 'nullable|string',
             'exit_screenshot' => 'nullable|image|max:5120',
         ]);
 
@@ -181,12 +188,14 @@ class TradeLogController extends Controller
 
         $trade->update([
             'status' => 'CLOSED',
+            
             'exit_date' => $validated['exit_date'],
+            'exit_time' => $validated['exit_time'], // Simpan Jam
+            
             'exit_price' => $validated['exit_price'],
             'fee' => $validated['fee'],
             'pnl' => $netPnL,
             'exit_reason' => $validated['exit_reason'],
-            // [UPDATE] Simpan catatan penutupan ke exit_notes (Entry note aman)
             'exit_notes' => $validated['notes'],
             'exit_screenshot' => $exitScreenshotPath,
         ]);
@@ -210,9 +219,11 @@ class TradeLogController extends Controller
             'pnl' => 0,
             'fee' => 0,
             'exit_price' => $trade->entry_price, 
-            'exit_date' => now(),
+            
+            'exit_date' => now()->format('Y-m-d'),
+            'exit_time' => now()->format('H:i:s'),
+            
             'exit_reason' => 'CANCELLED',
-            // [UPDATE] Simpan alasan cancel ke exit_notes
             'exit_notes' => $request->cancellation_note,
         ]);
 
