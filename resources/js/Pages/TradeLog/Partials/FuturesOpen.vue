@@ -36,22 +36,20 @@ const form = useForm({
     form_type: 'FUTURES'
 });
 
-// [FIXED] Watcher Logic: Menangani tipe data 'number' atau 'string' dengan aman
+// [LOGIC] Kalkulasi Otomatis (Realtime)
+// Menggunakan String() untuk menghindari error TypeScript pada tipe data
 watch([() => form.price, dynamicInput, inputMode, () => form.leverage], ([newPrice, newVal, mode, newLev]) => {
-    // Konversi aman ke Float
     const price = parseFloat(String(newPrice)) || 0;
     const inputVal = parseFloat(String(newVal)) || 0;
-    const lev = parseFloat(String(newLev)) || 1; // Default lev 1
+    const lev = parseFloat(String(newLev)) || 1; 
 
     if (price > 0 && inputVal > 0) {
         if (mode === 'ASSET') {
-            // Input: QTY (Coin) -> Hitung Margin ($)
-            // Rumus: (Price * Qty) / Leverage
+            // User input QTY (Coin) -> Hitung Margin ($)
             form.quantity = inputVal.toString();
             form.total = ((price * inputVal) / lev).toFixed(2); 
         } else {
-            // Input: MARGIN ($) -> Hitung Qty (Coin)
-            // Rumus: (Margin * Leverage) / Price
+            // User input MARGIN ($) -> Hitung Qty (Coin)
             form.total = inputVal.toString();
             form.quantity = ((inputVal * lev) / price).toFixed(8);
         }
@@ -223,9 +221,10 @@ const submit = () => {
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Date</label>
                             <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none">
                         </div>
+                        
                         <div class="w-1/3">
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Time</label>
-                            <input v-model="form.time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none">
+                            <input v-model="form.time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none cursor-pointer">
                         </div>
                     </div>
                 </div>
@@ -266,7 +265,7 @@ const submit = () => {
 </template>
 
 <style scoped>
-/* [FIXED] Hilangkan tombol panah di input number tanpa warning CSS */
+/* Hilangkan tombol panah angka */
 .no-spinner {
   appearance: textfield;
   -moz-appearance: textfield;
@@ -275,5 +274,12 @@ const submit = () => {
 .no-spinner::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* [PERBAIKAN] Paksa Ikon Jam (Picker) Jadi Putih & Muncul */
+input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+    opacity: 1;
 }
 </style>
