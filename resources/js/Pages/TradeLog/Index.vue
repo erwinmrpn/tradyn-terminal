@@ -146,9 +146,15 @@ const getHoldingClass = (period: string) => {
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-lg border border-[#2d2f36] relative shadow-inner">
-                        <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] bg-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(16,185,129,0.4)] z-0" 
-                            :class="{'left-1': props.activeType === 'SPOT', 'left-[calc(33.33%_+_2px)]': props.activeType === 'FUTURES', 'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'}">
+                        
+                        <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] rounded-full transition-all duration-300 ease-out z-0 bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_20px_rgba(140,82,255,0.5)]" 
+                            :class="{
+                                'left-1': props.activeType === 'SPOT',
+                                'left-[calc(33.33%_+_2px)]': props.activeType === 'FUTURES',
+                                'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'
+                            }">
                         </div>
+
                         <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
                         <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
                         <button @click="switchTab('RESULT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">RESULT</button>
@@ -312,17 +318,14 @@ const getHoldingClass = (period: string) => {
                                     </td>
                                     
                                     <td class="px-6 py-3 text-center">
-                                        
                                         <span v-if="trade.status === 'OPEN' && props.activeType === 'SPOT'" 
                                               class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-yellow-500/20 text-yellow-500 border border-yellow-500/20">
                                             HOLDING
                                         </span>
-
                                         <span v-else-if="trade.status === 'OPEN' && props.activeType === 'FUTURES'" 
                                               class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-blue-900/20 text-blue-400 border border-blue-500/20">
                                             OPEN
                                         </span>
-
                                         <span v-else class="px-2 py-1 text-[10px] font-bold rounded uppercase" 
                                             :class="(trade.status === 'SOLD' || trade.status === 'CLOSED') ? 'bg-green-900/20 text-green-400 border border-green-500/20' : 'bg-red-900/20 text-red-400 border border-red-500/20'">
                                             {{ trade.status }}
@@ -394,7 +397,6 @@ const getHoldingClass = (period: string) => {
 <style scoped>
 .no-spinner::-webkit-outer-spin-button, .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { appearance: textfield; -moz-appearance: textfield; }
-input[type="time"]::-webkit-calendar-picker-indicator, input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; opacity: 1; }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
 </style>

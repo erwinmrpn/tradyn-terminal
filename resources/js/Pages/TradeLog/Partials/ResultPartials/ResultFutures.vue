@@ -5,7 +5,7 @@ const props = defineProps<{
     trades: any[];
 }>();
 
-const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
+const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK'); // Default WEEK agar sesuai screenshot
 const expandedCards = ref<Set<number>>(new Set());
 
 // --- HELPERS ---
@@ -34,24 +34,20 @@ const isSameMonth = (d1: Date, d2: Date) => {
            d1.getMonth() === d2.getMonth();
 };
 
-// [NEW FIX] Logika Minggu yang Akurat (Senin - Minggu)
+// [LOGIC] Logika Minggu (Senin - Minggu)
 const isSameWeek = (date1: Date, date2: Date) => {
     const d1 = new Date(date1);
     const d2 = new Date(date2);
     
-    // Reset jam agar perbandingan murni tanggal
     d1.setHours(0, 0, 0, 0);
     d2.setHours(0, 0, 0, 0);
 
-    // Atur Minggu (0) menjadi 7, agar urutannya Senin(1) s/d Minggu(7)
     const day1 = d1.getDay() || 7; 
     const day2 = d2.getDay() || 7;
 
-    // Geser kedua tanggal ke hari SENIN terdekat di minggu mereka masing-masing
     d1.setDate(d1.getDate() - day1 + 1);
     d2.setDate(d2.getDate() - day2 + 1);
 
-    // Jika Senin-nya jatuh di tanggal yang sama, berarti satu minggu
     return d1.getTime() === d2.getTime();
 };
 
@@ -62,17 +58,12 @@ const filteredTrades = computed(() => {
     return props.trades
         .filter(t => {
             if (!t.exit_date) return false;
-            
-            // Konversi exit_date string ke Object Date
-            // Asumsi format t.exit_date adalah "YYYY-MM-DD"
-            // Kita perlu memastikan jam di-set ke 00:00 untuk komparasi tanggal yang aman
             const tradeDate = new Date(t.exit_date + 'T00:00:00');
             
             if (timeFrame.value === 'TODAY') {
                 return isSameDay(tradeDate, now);
             } 
             else if (timeFrame.value === 'WEEK') {
-                // Menggunakan logika baru isSameWeek
                 return isSameWeek(tradeDate, now);
             } 
             else if (timeFrame.value === 'MONTH') {
@@ -81,7 +72,6 @@ const filteredTrades = computed(() => {
             return false;
         })
         .sort((a, b) => {
-            // Sort Descending (Terbaru diatas)
             const timeA = new Date(a.exit_date + 'T' + (a.exit_time || '00:00')).getTime();
             const timeB = new Date(b.exit_date + 'T' + (b.exit_time || '00:00')).getTime();
             return timeB - timeA;
@@ -157,7 +147,7 @@ const getRR = (trade: any) => {
     return `1 : ${r.toFixed(1)}`;
 };
 
-// Styling
+// Styling Logics
 const pnlClass = computed(() => metrics.value.netPnL > 0 ? 'text-green-500' : (metrics.value.netPnL < 0 ? 'text-red-500' : 'text-gray-400'));
 const winRateClass = computed(() => metrics.value.winRate >= 60 ? 'text-green-500' : (metrics.value.winRate >= 50 ? 'text-yellow-500' : 'text-red-500'));
 const tradesClass = computed(() => timeFrame.value === 'TODAY' && metrics.value.totalTrades > 5 ? 'text-red-500' : 'text-white');
@@ -167,38 +157,62 @@ const rrClass = computed(() => metrics.value.avgRR >= 1.5 ? 'text-green-500' : (
 <template>
     <div class="space-y-8">
         
-        <div class="flex justify-between items-center">
-            <h3 class="text-sm font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                Futures Performance
-            </h3>
-            <select v-model="timeFrame" class="bg-[#1a1b20] border border-[#2d2f36] text-white text-xs rounded-lg p-2 outline-none focus:border-blue-500 cursor-pointer">
-                <option value="TODAY">Today</option>
-                <option value="WEEK">This Week</option>
-                <option value="MONTH">This Month</option>
-            </select>
+       <div class="flex justify-between items-center">
+    <h3 class="text-sm font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        </svg>
+        Futures Performance
+    </h3>
+    
+    <div class="relative group">
+        <select 
+            v-model="timeFrame" 
+            class="appearance-none cursor-pointer pl-4 pr-10 py-2 rounded-lg text-xs font-bold text-white 
+                   bg-[#1a1b20] border border-[#2d2f36] 
+                   focus:outline-none focus:border-[#8c52ff] focus:ring-1 focus:ring-[#8c52ff] 
+                   transition-all hover:border-[#5ce1e6]"
+        >
+            <option value="TODAY" class="bg-[#1a1b20] text-white py-2">Today</option>
+            <option value="WEEK" class="bg-[#1a1b20] text-white py-2">This Week</option>
+            <option value="MONTH" class="bg-[#1a1b20] text-white py-2">This Month</option>
+        </select>
+        
+        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 group-hover:text-white transition-colors">
+            <svg class="h-3 w-3 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
+            </svg>
         </div>
+    </div>
+</div>
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div class="bg-[#1a1b20] border border-[#2d2f36] rounded-xl p-4 flex flex-col justify-center items-center shadow-lg">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Net PnL</div>
+            <div class="summary-card-gradient">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Net PnL</div>
                 <div class="text-2xl font-black" :class="pnlClass">{{ metrics.netPnL > 0 ? '+' : '' }}{{ formatCurrency(metrics.netPnL) }}</div>
             </div>
-            <div class="bg-[#1a1b20] border border-[#2d2f36] rounded-xl p-4 flex flex-col justify-center items-center shadow-lg">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Win Rate</div>
+            
+            <div class="summary-card-gradient">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Win Rate</div>
                 <div class="text-xl font-bold" :class="winRateClass">{{ metrics.winRate.toFixed(0) }}%</div>
             </div>
-            <div class="bg-[#1a1b20] border border-[#2d2f36] rounded-xl p-4 flex flex-col justify-center items-center shadow-lg">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Trades</div>
-                <div class="text-xl font-bold" :class="tradesClass">{{ metrics.totalTrades }} <span class="text-xs font-normal text-gray-500">{{ timeFrame.toLowerCase() }}</span></div>
+            
+            <div class="summary-card-gradient">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Trades</div>
+                <div class="text-xl font-bold" :class="tradesClass">
+                    {{ metrics.totalTrades }} 
+                    <span class="text-[10px] font-normal text-gray-500 ml-1">{{ timeFrame === 'WEEK' ? 'week' : timeFrame.toLowerCase() }}</span>
+                </div>
             </div>
-            <div class="bg-[#1a1b20] border border-[#2d2f36] rounded-xl p-4 flex flex-col justify-center items-center shadow-lg">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Avg R:R</div>
+            
+            <div class="summary-card-gradient">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Avg R:R</div>
                 <div class="text-xl font-bold" :class="rrClass">1 : {{ Math.abs(metrics.avgRR).toFixed(1) }}</div>
             </div>
-            <div class="bg-[#1a1b20] border border-[#2d2f36] rounded-xl p-4 flex flex-col justify-center items-center shadow-lg">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Avg Duration</div>
-                <div class="text-xl font-bold text-white text-center text-sm md:text-xl">{{ formatDurationSmart(metrics.avgDurationMs) }}</div>
+            
+            <div class="summary-card-gradient">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Avg Duration</div>
+                <div class="text-xl font-bold text-white">{{ formatDurationSmart(metrics.avgDurationMs) }}</div>
             </div>
         </div>
 
@@ -206,7 +220,7 @@ const rrClass = computed(() => metrics.value.avgRR >= 1.5 ? 'text-green-500' : (
             
             <div v-for="trade in filteredTrades" :key="trade.id" class="relative group">
                 
-                <div class="p-[2px] rounded-2xl bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.2)] hover:shadow-[0_0_25px_rgba(92,225,230,0.4)] transition-all duration-300">
+                <div class="p-[2px] rounded-2xl bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.1)] hover:shadow-[0_0_25px_rgba(92,225,230,0.3)] transition-all duration-300">
                     
                     <div class="bg-[#121317] rounded-2xl h-full flex flex-col justify-between overflow-hidden">
                         
@@ -325,6 +339,31 @@ const rrClass = computed(() => metrics.value.avgRR >= 1.5 ? 'text-green-500' : (
 </template>
 
 <style scoped>
+/* --- ANIMASI --- */
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-in-down { animation: fadeInDown 0.3s ease-out forwards; }
+
+/* --- STYLE BARU: SUMMARY CARDS DENGAN GRADIENT BORDER --- */
+.summary-card-gradient {
+  position: relative;
+  padding: 1.5rem 1rem; /* p-4 equivalent */
+  border-radius: 0.75rem; /* rounded-xl */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+  
+  /* Logika Gradient Border */
+  border: 2px solid transparent;
+  
+  /* Layer 1: Background Dalam (Gunakan warna gelap senada background utama) */
+  /* Layer 2: Gradient Warna #8c52ff -> #5ce1e6 */
+  background-image: 
+      linear-gradient(#151515, #151515), 
+      linear-gradient(90deg, #8c52ff, #5ce1e6);
+  
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}
 </style>
