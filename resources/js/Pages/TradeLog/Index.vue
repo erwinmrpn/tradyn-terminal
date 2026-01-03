@@ -5,9 +5,9 @@ import Navbar from '@/Components/Navbar.vue';
 import Footer from '@/Components/Footer.vue';
 import { ref, watch, onMounted, computed, nextTick } from 'vue';
 
-// --- [PENTING] IMPORT KOMPONEN ANAK ---
-// Jika file ini merah/error, berarti file di folder Partials belum dibuat!
-import SpotForm from './Partials/SpotForm.vue';
+// --- IMPORT KOMPONEN ANAK ---
+import SpotBuy from './Partials/SpotBuy.vue';
+import SpotSell from './Partials/SpotSell.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
 import FuturesClose from './Partials/FuturesClose.vue';
 import ResultSection from './Partials/ResultSection.vue';
@@ -22,18 +22,19 @@ const props = defineProps<{
     selectedAccountId: string;
 }>();
 
-// --- 1. LOGIKA MODAL DELETE (Fitur Hapus) ---
+// --- STATE MODALS ---
 const showDeleteModal = ref(false);
 const tradeToDelete = ref<any>(null);
+const showNoteModal = ref(false);
+const noteContent = ref('');
+const noteTitle = ref('Note'); 
+const showImageModal = ref(false);
+const selectedImageUrl = ref('');
+const selectedImageName = ref('');
 
-const confirmDelete = (trade: any) => {
-    tradeToDelete.value = trade;
-    showDeleteModal.value = true;
-};
-const cancelDelete = () => {
-    showDeleteModal.value = false;
-    tradeToDelete.value = null;
-};
+// --- ACTIONS ---
+const confirmDelete = (trade: any) => { tradeToDelete.value = trade; showDeleteModal.value = true; };
+const cancelDelete = () => { showDeleteModal.value = false; tradeToDelete.value = null; };
 const proceedDelete = () => {
     if (!tradeToDelete.value) return;
     router.delete(route('trade.log.destroy', { id: tradeToDelete.value.id, type: props.activeType }), {
@@ -42,33 +43,19 @@ const proceedDelete = () => {
     });
 };
 
-// --- 2. LOGIKA MODAL VIEW NOTE (Fitur Lihat Catatan) ---
-const showNoteModal = ref(false);
-const noteContent = ref('');
-const noteTitle = ref('Note'); 
-
-const viewNote = (note: string, type: 'Entry' | 'Close' | 'Cancel' | 'Spot') => {
+const viewNote = (note: string, type: string) => {
     noteContent.value = note || 'No notes available.';
-    if (type === 'Spot') noteTitle.value = 'Trade Note';
-    else if (type === 'Close') noteTitle.value = 'Close Position Note';
-    else if (type === 'Cancel') noteTitle.value = 'Cancellation Reason';
-    else noteTitle.value = 'Entry Note';
+    noteTitle.value = type + ' Note';
     showNoteModal.value = true;
 };
-const closeNoteModal = () => { showNoteModal.value = false; noteContent.value = ''; };
+const closeNoteModal = () => { showNoteModal.value = false; };
 
-// --- 3. LOGIKA MODAL IMAGE & DOWNLOAD (Fitur Lihat Chart) ---
-const showImageModal = ref(false);
-const selectedImageUrl = ref('');
-const selectedImageName = ref('');
-
-const openImageModal = (imagePath: string, type: 'Entry' | 'Exit') => {
+const openImageModal = (imagePath: string, type: string) => {
     selectedImageUrl.value = imagePath.startsWith('http') ? imagePath : `/storage/${imagePath}`;
-    selectedImageName.value = `${type}-Chart-${Date.now()}.png`;
+    selectedImageName.value = `${type}-Chart.png`;
     showImageModal.value = true;
 };
-const closeImageModal = () => { showImageModal.value = false; selectedImageUrl.value = ''; };
-
+const closeImageModal = () => { showImageModal.value = false; };
 const downloadImage = () => {
     if (!selectedImageUrl.value) return;
     const link = document.createElement('a');
@@ -79,7 +66,7 @@ const downloadImage = () => {
     document.body.removeChild(link);
 };
 
-// --- 4. LOGIKA UTAMA (FILTER & BALANCE) ---
+// --- LOGIC UTAMA ---
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
     let filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
@@ -93,23 +80,31 @@ const displayedBalance = computed(() => {
     return 0;
 });
 
-const form = useForm({ trading_account_id: '' });
+const selectedAccount = ref(props.selectedAccountId);
 const resultSubTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
+const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
+const spotTab = ref<'BUY' | 'SELL'>('BUY'); 
 
+// Auto Select Account
 const applySmartDefaults = () => {
     if (filteredAccounts.value.length > 0) {
         const firstAccountID = filteredAccounts.value[0].id;
-        form.trading_account_id = firstAccountID;
         const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
-        if (selectedAccount.value === 'all' || !isCurrentSelectionValid) {
-             selectedAccount.value = firstAccountID;
-        }
-    } else {
-        form.trading_account_id = '';
+        if (selectedAccount.value === 'all' || !isCurrentSelectionValid) selectedAccount.value = firstAccountID;
     }
 };
 
 watch(resultSubTab, () => { if (props.activeType === 'RESULT') applySmartDefaults(); });
+watch(selectedAccount, (newAccount) => {
+    if (newAccount && newAccount !== props.selectedAccountId) {
+        router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
+    }
+});
+watch(() => props.activeType, () => {
+    if (props.activeType === 'FUTURES') futuresTab.value = 'OPEN';
+    if (props.activeType === 'SPOT') spotTab.value = 'BUY';
+    nextTick(() => { applySmartDefaults(); });
+});
 
 const isSidebarCollapsed = ref(false);
 onMounted(() => {
@@ -122,35 +117,20 @@ const toggleSidebar = () => {
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
-const selectedAccount = ref(props.selectedAccountId);
 const switchTab = (type: string) => {
     router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
 };
-watch(selectedAccount, (newAccount) => {
-    if (newAccount && newAccount !== props.selectedAccountId) {
-        router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
-    }
-});
 
-const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
-watch(() => props.activeType, () => {
-    if (props.activeType === 'FUTURES') futuresTab.value = 'OPEN';
-    nextTick(() => { applySmartDefaults(); });
-});
+// Helper Formatters
+const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+const formatTimeShort = (timeString: string) => timeString ? timeString.slice(0, 5) : '';
 
-// Helper Format Uang
-const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-};
-// Helper Format Tanggal (Potong Jam)
-const formatDateOnly = (dateString: string) => {
-    if (!dateString) return '-';
-    return dateString.split(' ')[0];
-};
-// Helper Jam pendek (HH:mm)
-const formatTimeShort = (timeString: string) => {
-    if (!timeString) return '';
-    return timeString.slice(0, 5); 
+// Helper Warna Holding Period
+const getHoldingClass = (period: string) => {
+    if (period === 'Short Term') return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
+    if (period === 'Medium Term') return 'text-blue-400 border-blue-500/30 bg-blue-500/10';
+    if (period === 'Long Term') return 'text-purple-400 border-purple-500/30 bg-purple-500/10';
+    return 'text-gray-400 border-gray-600 bg-gray-800';
 };
 </script>
 
@@ -160,21 +140,14 @@ const formatTimeShort = (timeString: string) => {
     <div class="min-h-screen bg-[#0a0b0d] text-gray-300 font-sans relative">
         <Sidebar :is-collapsed="isSidebarCollapsed" @toggle="toggleSidebar" />
 
-        <div class="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
-            :class="isSidebarCollapsed ? 'ml-[72px]' : 'ml-64'">
-            
+        <div class="transition-all duration-300 ease-in-out min-h-screen flex flex-col" :class="isSidebarCollapsed ? 'ml-[72px]' : 'ml-64'">
             <Navbar />
-
             <main class="p-6 lg:p-8 space-y-8 flex-1 pb-20">
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-lg border border-[#2d2f36] relative shadow-inner">
                         <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] bg-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(16,185,129,0.4)] z-0" 
-                            :class="{
-                                'left-1': props.activeType === 'SPOT',
-                                'left-[calc(33.33%_+_2px)]': props.activeType === 'FUTURES',
-                                'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'
-                            }">
+                            :class="{'left-1': props.activeType === 'SPOT', 'left-[calc(33.33%_+_2px)]': props.activeType === 'FUTURES', 'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'}">
                         </div>
                         <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
                         <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
@@ -184,9 +157,7 @@ const formatTimeShort = (timeString: string) => {
 
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
-                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
-                            Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance
-                        </div>
+                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance</div>
                         <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(displayedBalance) }}</div>
                     </div>
                     <div class="relative w-full sm:w-64">
@@ -194,23 +165,28 @@ const formatTimeShort = (timeString: string) => {
                             <option value="all">All Accounts</option>
                             <option v-for="acc in filteredAccounts" :key="acc.id" :value="acc.id">{{ acc.name }} ({{ acc.exchange }})</option>
                         </select>
-                         <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-                        </div>
+                         <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg></div>
                     </div>
                 </div>
 
-                <SpotForm v-if="props.activeType === 'SPOT'" :accounts="filteredAccounts" />
+                <div v-if="props.activeType === 'SPOT'">
+                    <div class="flex justify-center mb-8">
+                        <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
+                            <div class="absolute top-1 bottom-1 w-[calc(50%_-_4px)] rounded-full transition-all duration-300 ease-out shadow-lg z-0" 
+                                :class="spotTab === 'BUY' ? 'left-1 bg-emerald-600 shadow-emerald-500/40' : 'left-[calc(50%_+_2px)] bg-red-600 shadow-red-500/40'">
+                            </div>
+                            <button @click="spotTab = 'BUY'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="spotTab === 'BUY' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Buy Asset</button>
+                            <button @click="spotTab = 'SELL'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="spotTab === 'SELL' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Sell Asset</button>
+                        </div>
+                    </div>
+                    <SpotBuy v-if="spotTab === 'BUY'" :accounts="filteredAccounts" />
+                    <SpotSell v-else :trades="props.trades" />
+                </div>
 
                 <div v-if="props.activeType === 'FUTURES'">
                     <div class="flex justify-center mb-8">
                         <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-md border border-[#2d2f36] relative shadow-inner">
-                            <div class="absolute top-1 bottom-1 w-[calc(50%_-_4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)] z-0" 
-                                :class="{
-                                    'left-1': futuresTab === 'OPEN',
-                                    'left-[calc(50%_+_2px)]': futuresTab === 'CLOSE'
-                                }">
-                            </div>
+                            <div class="absolute top-1 bottom-1 w-[calc(50%_-_4px)] bg-blue-600 rounded-full transition-all duration-300 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)] z-0" :class="{'left-1': futuresTab === 'OPEN', 'left-[calc(50%_+_2px)]': futuresTab === 'CLOSE'}"></div>
                             <button @click="futuresTab = 'OPEN'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'OPEN' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Open Position</button>
                             <button @click="futuresTab = 'CLOSE'" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="futuresTab === 'CLOSE' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">Close Position</button>
                         </div>
@@ -223,7 +199,7 @@ const formatTimeShort = (timeString: string) => {
                     <ResultSection v-model:activeTab="resultSubTab" :trades="props.trades" />
                 </div>
 
-                <div v-if="props.activeType === 'SPOT' || (props.activeType === 'FUTURES' && futuresTab === 'OPEN')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
+                <div v-if="(props.activeType === 'SPOT' && spotTab === 'BUY') || (props.activeType === 'FUTURES' && futuresTab === 'OPEN')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
                     <div class="p-4 border-b border-[#1f2128] bg-[#1a1b20]/50 flex justify-between items-center">
                         <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">History Log</h3>
                         <span class="text-[10px] text-gray-600">Recent activity</span>
@@ -234,20 +210,23 @@ const formatTimeShort = (timeString: string) => {
                                 <tr>
                                     <th class="px-6 py-3">Asset</th>
                                     <th class="px-6 py-3" v-if="props.activeType === 'FUTURES'">Entry / Exit Time</th>
-                                    <th class="px-6 py-3" v-else>Date</th>
+                                    <th class="px-6 py-3" v-else>Buy / Sell Time</th>
 
-                                    <th class="px-6 py-3">Type</th>
+                                    <th class="px-6 py-3" v-if="props.activeType === 'FUTURES'">Type</th>
+                                    
                                     <th class="px-6 py-3 text-right">Price</th>
                                     <th class="px-6 py-3 text-right">Size/Qty</th>
+                                    
                                     <template v-if="props.activeType === 'SPOT'">
-                                        <th class="px-6 py-3 text-right">Total</th>
-                                        <th class="px-6 py-3 text-right">Fee</th>
+                                        <th class="px-6 py-3 text-center">Holding</th>
+                                        <th class="px-6 py-3 text-right">Targets</th>
                                     </template>
                                     <template v-else>
                                         <th class="px-6 py-3 text-right">Margin</th>
                                         <th class="px-6 py-3 text-center">Lev</th>
-                                        <th class="px-6 py-3 text-right">Chart</th>
                                     </template>
+
+                                    <th class="px-6 py-3 text-right">Chart</th>
                                     <th class="px-6 py-3 text-right">Notes</th>
                                     <th class="px-6 py-3 text-center">Status</th> 
                                     <th class="px-6 py-3 text-center">Action</th>
@@ -255,71 +234,106 @@ const formatTimeShort = (timeString: string) => {
                             </thead>
                             <tbody class="divide-y divide-[#1f2128]">
                                 <tr v-for="trade in props.trades" :key="trade.id" class="hover:bg-[#1a1b20]/50 transition-colors group text-sm">
+                                    
                                     <td class="px-6 py-3 font-bold text-white">{{ trade.symbol }}<span class="text-[10px] text-gray-500 font-normal ml-1 bg-[#1f2128] px-1 rounded">{{ trade.trading_account ? trade.trading_account.name : 'Account' }}</span></td>
                                     
                                     <td class="px-6 py-3 text-xs">
-                                        <div v-if="props.activeType === 'SPOT'" class="text-gray-400">{{ trade.date }}</div>
-                                        <div v-else class="flex flex-col gap-1">
+                                        <div class="flex flex-col gap-1">
                                             <div class="flex items-center gap-1.5">
-                                                <span class="text-[9px] uppercase font-bold text-blue-500 bg-blue-500/10 px-1 rounded">IN</span>
-                                                <span class="text-gray-300 font-mono">{{ trade.entry_date }}</span>
-                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(trade.entry_time) }}</span>
+                                                <span class="text-[9px] uppercase font-bold text-blue-500 bg-blue-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'BUY' : 'IN' }}</span>
+                                                <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.buy_date : trade.entry_date }}</span>
+                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.buy_time : trade.entry_time) }}</span>
                                             </div>
-                                            <div v-if="trade.exit_date" class="flex items-center gap-1.5">
-                                                <span class="text-[9px] uppercase font-bold text-yellow-500 bg-yellow-500/10 px-1 rounded">OUT</span>
-                                                <span class="text-gray-300 font-mono">{{ trade.exit_date }}</span>
-                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(trade.exit_time) }}</span>
+                                            <div v-if="(props.activeType === 'SPOT' && trade.sell_date) || (props.activeType === 'FUTURES' && trade.exit_date)" class="flex items-center gap-1.5">
+                                                <span class="text-[9px] uppercase font-bold text-yellow-500 bg-yellow-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'SELL' : 'OUT' }}</span>
+                                                <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.sell_date : trade.exit_date }}</span>
+                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.sell_time : trade.exit_time) }}</span>
                                             </div>
-                                            <div v-else class="text-gray-600 text-[10px] italic pl-8">In Position...</div>
                                         </div>
                                     </td>
 
-                                    <td class="px-6 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span></td>
+                                    <td class="px-6 py-3" v-if="props.activeType === 'FUTURES'">
+                                        <span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span>
+                                    </td>
+
                                     <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(props.activeType === 'SPOT' ? trade.price : trade.entry_price) }}</td>
-                                    <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ Number(trade.quantity) }}</td>
+                                    
+                                    <td class="px-6 py-3 text-right text-xs font-mono">
+                                        <div>{{ Number(trade.quantity) }}</div>
+                                        <div class="text-[10px] text-gray-500" v-if="props.activeType === 'SPOT' && trade.price && trade.quantity">
+                                            ≈ {{ formatCurrency(parseFloat(trade.price) * parseFloat(trade.quantity)) }}
+                                        </div>
+                                    </td>
                                     
                                     <template v-if="props.activeType === 'SPOT'">
-                                        <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.total) }}</td>
-                                        <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">{{ formatCurrency(trade.fee) }}</td>
+                                        <td class="px-6 py-3 text-center text-xs">
+                                            <span class="px-2 py-1 rounded border text-[10px] font-bold uppercase" :class="getHoldingClass(trade.holding_period)">
+                                                {{ trade.holding_period?.replace(' Term', '') }}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-3 text-right text-xs font-mono">
+                                            <div class="flex flex-col items-end">
+                                                <span class="text-emerald-500" title="Target Sell">{{ trade.target_sell_price ? formatCurrency(trade.target_sell_price) : '-' }}</span>
+                                                <span class="text-blue-500 text-[10px]" title="Target Buy">{{ trade.target_buy_price ? formatCurrency(trade.target_buy_price) : '-' }}</span>
+                                            </div>
+                                        </td>
                                     </template>
                                     <template v-else>
                                         <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.margin) }}</td>
                                         <td class="px-6 py-3 text-center text-yellow-500 text-xs font-bold">{{ trade.leverage }}x</td>
-                                        <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
-                                            <div class="flex flex-col items-end gap-1">
-                                                <button v-if="trade.entry_screenshot" @click.prevent="openImageModal(trade.entry_screenshot, 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">Entry Chart</button>
-                                                <button v-if="trade.exit_screenshot" @click.prevent="openImageModal(trade.exit_screenshot, 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">Exit Chart</button>
-                                                <span v-if="!trade.entry_screenshot && !trade.exit_screenshot" class="text-gray-600">-</span>
-                                            </div>
-                                        </td>
                                     </template>
+
+                                    <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
+                                        <div class="flex flex-col items-end gap-1">
+                                            <button v-if="trade.entry_screenshot || trade.buy_screenshot" @click.prevent="openImageModal(trade.entry_screenshot || trade.buy_screenshot, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
+                                                {{ props.activeType === 'SPOT' ? 'Buy Chart' : 'Entry Chart' }}
+                                            </button>
+                                            <button v-if="trade.exit_screenshot || trade.sell_screenshot" @click.prevent="openImageModal(trade.exit_screenshot || trade.sell_screenshot, props.activeType === 'SPOT' ? 'Sell' : 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">
+                                                {{ props.activeType === 'SPOT' ? 'Sell Chart' : 'Exit Chart' }}
+                                            </button>
+                                            <span v-if="!trade.entry_screenshot && !trade.buy_screenshot && !trade.exit_screenshot && !trade.sell_screenshot" class="text-gray-600">-</span>
+                                        </div>
+                                    </td>
                                     
                                     <td class="px-6 py-3 text-right font-bold text-xs font-mono">
                                         <div class="flex flex-col items-end gap-1">
-                                            <button v-if="trade.entry_notes || (props.activeType === 'SPOT' && trade.notes)" 
-                                                @click="viewNote(trade.entry_notes || trade.notes, props.activeType === 'SPOT' ? 'Spot' : 'Entry')" 
+                                            <button v-if="trade.entry_notes || trade.buy_notes" 
+                                                @click="viewNote(trade.entry_notes || trade.buy_notes, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" 
                                                 class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
-                                                {{ props.activeType === 'SPOT' ? 'Trade Note' : 'Entry Note' }}
+                                                {{ props.activeType === 'SPOT' ? 'Buy Note' : 'Entry Note' }}
                                             </button>
-                                            <button v-if="props.activeType === 'FUTURES' && trade.exit_notes" 
-                                                @click="viewNote(trade.exit_notes, trade.status === 'CANCELLED' ? 'Cancel' : 'Close')" 
+                                            <button v-if="trade.exit_notes || trade.sell_notes" 
+                                                @click="viewNote(trade.exit_notes || trade.sell_notes, props.activeType === 'SPOT' ? 'Sell' : (trade.status === 'CANCELLED' ? 'Cancel' : 'Close'))" 
                                                 class="text-yellow-400 hover:text-yellow-300 underline focus:outline-none text-[10px]">
-                                                {{ trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note' }}
+                                                {{ props.activeType === 'SPOT' ? 'Sell Note' : (trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note') }}
                                             </button>
-                                            <span v-if="!trade.entry_notes && !trade.exit_notes && !trade.notes" class="text-gray-600">-</span>
+                                            <span v-if="!trade.entry_notes && !trade.buy_notes && !trade.exit_notes && !trade.sell_notes" class="text-gray-600">-</span>
                                         </div>
                                     </td>
                                     
                                     <td class="px-6 py-3 text-center">
-                                        <span class="px-2 py-1 text-[10px] font-bold rounded uppercase" :class="props.activeType === 'SPOT' ? 'bg-gray-800 text-gray-400' : (trade.status === 'OPEN' ? 'bg-blue-900/20 text-blue-400 border border-blue-500/20' : (trade.status === 'CANCELLED' ? 'bg-red-900/20 text-red-400 border border-red-500/20' : 'bg-gray-800 text-gray-400'))">
-                                            {{ props.activeType === 'SPOT' ? 'FILLED' : trade.status }}
+                                        
+                                        <span v-if="trade.status === 'OPEN' && props.activeType === 'SPOT'" 
+                                              class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-yellow-500/20 text-yellow-500 border border-yellow-500/20">
+                                            HOLDING
+                                        </span>
+
+                                        <span v-else-if="trade.status === 'OPEN' && props.activeType === 'FUTURES'" 
+                                              class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-blue-900/20 text-blue-400 border border-blue-500/20">
+                                            OPEN
+                                        </span>
+
+                                        <span v-else class="px-2 py-1 text-[10px] font-bold rounded uppercase" 
+                                            :class="(trade.status === 'SOLD' || trade.status === 'CLOSED') ? 'bg-green-900/20 text-green-400 border border-green-500/20' : 'bg-red-900/20 text-red-400 border border-red-500/20'">
+                                            {{ trade.status }}
                                         </span>
                                     </td>
+
                                     <td class="px-6 py-3 text-center">
                                         <button @click="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-2 rounded-full hover:bg-red-500/10" title="Delete Trade"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                                     </td>
                                 </tr>
-                                <tr v-if="props.trades.length === 0"><td colspan="10" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
+                                <tr v-if="props.trades.length === 0"><td colspan="12" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -334,14 +348,12 @@ const formatTimeShort = (timeString: string) => {
                         <div class="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div>
                         <h3 class="text-lg font-bold text-white mb-2">Delete Trade?</h3>
                         <div class="bg-red-500/5 border border-red-500/10 rounded-lg p-4 text-left">
-                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">Notes, reflections, screenshots, cancel reasons, and all statistics will be <span class="text-red-400 font-bold">permanently removed after 30 days</span>.</p>
-                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">This data helps you (and future AI insights) learn from past trades.</p>
-                            <p class="text-xs text-blue-400 font-semibold cursor-pointer hover:underline flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Consider exporting it first as a backup.</p>
+                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">This action cannot be undone.</p>
                         </div>
                     </div>
                     <div class="flex gap-3">
-                        <button @click="cancelDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-gray-400 bg-[#1a1b20] hover:bg-[#25262c] border border-[#2d2f36] transition-all">[ Cancel ]</button>
-                        <button @click="proceedDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900/20 transition-all">[ Delete ]</button>
+                        <button @click="cancelDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-gray-400 bg-[#1a1b20] hover:bg-[#25262c] border border-[#2d2f36] transition-all">Cancel</button>
+                        <button @click="proceedDelete" class="flex-1 py-3 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-900/20 transition-all">Delete</button>
                     </div>
                 </div>
             </div>
@@ -382,6 +394,7 @@ const formatTimeShort = (timeString: string) => {
 <style scoped>
 .no-spinner::-webkit-outer-spin-button, .no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { appearance: textfield; -moz-appearance: textfield; }
+input[type="time"]::-webkit-calendar-picker-indicator, input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; opacity: 1; }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
 </style>

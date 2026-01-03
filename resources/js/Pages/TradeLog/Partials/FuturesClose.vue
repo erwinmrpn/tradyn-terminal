@@ -251,7 +251,7 @@ const submitCancel = () => {
                                 <input v-model="formClose.notes" type="text" placeholder="Why did I close here?" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-sm rounded p-2.5 focus:border-yellow-500 outline-none">
                             </div>
                             <div class="col-span-1 relative">
-                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Chart</label>
+                                <label class="block text-[10px] text-gray-500 mb-1 font-bold uppercase">Exit Chart (Optional)</label>
                                 <label class="flex items-center justify-center w-full h-[40px] bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer hover:border-gray-500 text-gray-400 text-xs overflow-hidden">
                                     <span v-if="isCompressing" class="animate-pulse text-yellow-500">...</span>
                                     <span v-else-if="formClose.exit_screenshot" class="text-blue-400 truncate px-1">{{ formClose.exit_screenshot.name }}</span>

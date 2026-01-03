@@ -11,20 +11,32 @@ use App\Models\FuturesTrade;
 
 class TradeLogController extends Controller
 {
+    /**
+     * 1. Menampilkan Halaman Trade Log
+     * Mengatur data untuk Tab SPOT, FUTURES, dan RESULT
+     */
     public function index(Request $request)
     {
         $type = $request->input('type', 'SPOT'); 
         $accountId = $request->input('account_id', 'all');
         $user = Auth::user();
 
+        // --- QUERY DATA TRADES ---
         if ($type === 'FUTURES') {
             $query = FuturesTrade::query();
         } elseif ($type === 'RESULT') {
+            // Tab RESULT: Hanya menampilkan trade yang sudah selesai (CLOSED)
+            // Untuk Futures, status 'CLOSED'. Untuk Spot, status 'SOLD'.
+            // Namun, karena Result Section saat ini dipisah per Tab di Frontend,
+            // query ini mungkin lebih spesifik ke Futures jika sub-tab defaultnya Futures.
+            // Kita biarkan logic ini handle Futures Result dulu.
             $query = FuturesTrade::query()->where('status', 'CLOSED');
         } else {
+            // Tab SPOT: Tampilkan semua history spot
             $query = SpotTrade::query();
         }
 
+        // --- FILTER BERDASARKAN AKUN ---
         if ($accountId !== 'all') {
             $query->where('trading_account_id', $accountId);
         } else {
@@ -33,11 +45,15 @@ class TradeLogController extends Controller
             });
         }
 
-        // [UPDATE] Gunakan exit_datetime / entry_datetime untuk sorting
-        $sortField = ($type === 'SPOT') ? 'date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
+        // --- SORTING DATA ---
+        // Spot: berdasarkan tanggal beli (buy_date)
+        // Futures/Result: berdasarkan tanggal entry atau exit
+        $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
+        
         $trades = $query->with('tradingAccount')->latest($sortField)->get();
         $accounts = $user->tradingAccounts;
 
+        // --- HITUNG BALANCE TERPISAH ---
         $spotBalance = $user->tradingAccounts()->where('strategy_type', 'SPOT')->sum('balance');
         $futuresBalance = $user->tradingAccounts()->where('strategy_type', 'FUTURES')->sum('balance');
         $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
@@ -54,6 +70,10 @@ class TradeLogController extends Controller
         ]);
     }
 
+    /**
+     * 2. Menyimpan Transaksi Baru (Entry / Buy)
+     * Handle Form SPOT (Buy) dan Form FUTURES (Open Position)
+     */
     public function store(Request $request)
     {
         $request->validate(['form_type' => 'required|in:SPOT,FUTURES']);
@@ -64,12 +84,13 @@ class TradeLogController extends Controller
             $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
         }
 
+        // === LOGIKA FUTURES (OPEN POSITION) ===
         if ($request->form_type === 'FUTURES') {
             
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
-                'date' => 'required|date', // Input form tetap 'date', tapi disimpan ke datetime
-                'time' => 'required',
+                'date' => 'required|date', // entry_date
+                'time' => 'required',      // entry_time
                 'type' => 'required|in:LONG,SHORT',
                 'symbol' => 'required|string',
                 'market_type' => 'required|string',
@@ -92,10 +113,8 @@ class TradeLogController extends Controller
 
             FuturesTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
-                
                 'entry_date' => $validated['date'],
                 'entry_time' => $validated['time'],
-                
                 'type' => $validated['type'],
                 'symbol' => strtoupper($validated['symbol']),
                 'market_type' => $validated['market_type'],
@@ -113,49 +132,56 @@ class TradeLogController extends Controller
             ]);
 
             return redirect()->back()->with('success', 'Futures position opened!');
-        } else {
-            // ... Logic Spot (Tidak berubah) ...
+        } 
+        
+        // === LOGIKA SPOT (BUY ASSET) ===
+        else {
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
                 'symbol' => 'required|string|uppercase',
                 'market_type' => 'required|string',
-                'type' => 'required|in:BUY,SELL',
-                'price' => 'required|numeric|min:0',
-                'quantity' => 'required|numeric|min:0',
-                'total' => 'required|numeric|min:0',
-                'fee' => 'nullable|numeric|min:0',
                 'date' => 'required|date',
+                'time' => 'required',
+                'price' => 'required|numeric|min:0', // Buy Price
+                'quantity' => 'required|numeric|min:0',
+                'total' => 'required|numeric|min:0', // Total Invested (USDT)
+                'target_sell' => 'nullable|numeric',
+                'target_buy' => 'nullable|numeric',
+                'holding_period' => 'nullable|string',
                 'notes' => 'nullable|string',
             ]);
+
             $account = TradingAccount::find($validated['trading_account_id']);
-            $tradeTotal = $validated['total']; 
-            $fee = $validated['fee'] ?? 0;
-            if ($validated['type'] === 'BUY') {
-                $deduction = $tradeTotal + $fee;
-                if ($account->balance < $deduction) {
-                    return back()->withErrors(['balance' => 'Insufficient balance!']);
-                }
-                $account->decrement('balance', $deduction);
-            } else {
-                $addition = $tradeTotal - $fee;
-                $account->increment('balance', $addition);
+            
+            // Cek Saldo Spot
+            if ($account->balance < $validated['total']) {
+                return back()->withErrors(['balance' => 'Insufficient balance!']);
             }
+            $account->decrement('balance', $validated['total']);
+
             SpotTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
-                'symbol' => $validated['symbol'],
+                'symbol' => strtoupper($validated['symbol']),
                 'market_type' => $validated['market_type'],
-                'type' => $validated['type'],
+                'status' => 'OPEN',
+                'buy_date' => $validated['date'],
+                'buy_time' => $validated['time'],
                 'price' => $validated['price'],
                 'quantity' => $validated['quantity'],
-                'total' => $validated['total'],
-                'fee' => $fee,
-                'date' => $validated['date'],
-                'notes' => $validated['notes'],
+                'target_sell_price' => $validated['target_sell'],
+                'target_buy_price' => $validated['target_buy'],
+                'holding_period' => $validated['holding_period'],
+                'buy_screenshot' => $screenshotPath,
+                'buy_notes' => $validated['notes'],
             ]);
-            return redirect()->back()->with('success', 'Spot trade saved successfully.');
+
+            return redirect()->back()->with('success', 'Spot asset bought!');
         }
     }
 
+    /**
+     * 3. Close Position (FUTURES)
+     */
     public function closePosition(Request $request, $id)
     {
         $trade = FuturesTrade::findOrFail($id);
@@ -188,10 +214,8 @@ class TradeLogController extends Controller
 
         $trade->update([
             'status' => 'CLOSED',
-            
             'exit_date' => $validated['exit_date'],
-            'exit_time' => $validated['exit_time'], // Simpan Jam
-            
+            'exit_time' => $validated['exit_time'],
             'exit_price' => $validated['exit_price'],
             'fee' => $validated['fee'],
             'pnl' => $netPnL,
@@ -203,6 +227,9 @@ class TradeLogController extends Controller
         return redirect()->back()->with('success', 'Position closed.');
     }
 
+    /**
+     * 4. Cancel Position (FUTURES)
+     */
     public function cancelPosition(Request $request, $id)
     {
         $trade = FuturesTrade::findOrFail($id);
@@ -219,10 +246,8 @@ class TradeLogController extends Controller
             'pnl' => 0,
             'fee' => 0,
             'exit_price' => $trade->entry_price, 
-            
             'exit_date' => now()->format('Y-m-d'),
             'exit_time' => now()->format('H:i:s'),
-            
             'exit_reason' => 'CANCELLED',
             'exit_notes' => $request->cancellation_note,
         ]);
@@ -230,6 +255,61 @@ class TradeLogController extends Controller
         return redirect()->back()->with('success', 'Trade cancelled.');
     }
 
+    /**
+     * 5. Sell Asset (SPOT) - NEW FUNCTION
+     */
+    public function sellSpot(Request $request, $id)
+    {
+        $trade = SpotTrade::findOrFail($id);
+        // Security check
+        if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $validated = $request->validate([
+            'sell_date' => 'required|date',
+            'sell_time' => 'required',
+            'sell_price' => 'required|numeric|min:0',
+            'fee' => 'required|numeric|min:0',
+            'notes' => 'nullable|string',
+            'sell_screenshot' => 'nullable|image|max:5120',
+        ]);
+
+        $sellScreenshotPath = null;
+        if ($request->hasFile('sell_screenshot')) {
+            $sellScreenshotPath = $request->file('sell_screenshot')->store('screenshots', 'public');
+        }
+
+        // Hitung PnL Spot
+        // Revenue = (Sell Price * Qty) -> Total uang yang didapat dari penjualan
+        // Cost = (Buy Price * Qty) -> Total uang yang dikeluarkan saat beli
+        // PnL = Revenue - Cost - Fee
+        $revenue = $validated['sell_price'] * $trade->quantity;
+        $cost = $trade->price * $trade->quantity; 
+        $pnl = $revenue - $cost - $validated['fee'];
+
+        // Kembalikan dana ke saldo
+        // Saldo bertambah sebesar Revenue dikurangi Fee (karena fee diambil dari hasil jual biasanya)
+        $account = TradingAccount::find($trade->trading_account_id);
+        $account->increment('balance', ($revenue - $validated['fee']));
+
+        $trade->update([
+            'status' => 'SOLD',
+            'sell_date' => $validated['sell_date'],
+            'sell_time' => $validated['sell_time'],
+            'sell_price' => $validated['sell_price'],
+            'fee' => $validated['fee'],
+            'pnl' => $pnl,
+            'sell_notes' => $validated['notes'],
+            'sell_screenshot' => $sellScreenshotPath,
+        ]);
+
+        return redirect()->back()->with('success', 'Spot asset sold successfully.');
+    }
+
+    /**
+     * 6. Hapus Data Trade (Delete)
+     */
     public function destroy(Request $request, $id)
     {
         $type = $request->input('type');

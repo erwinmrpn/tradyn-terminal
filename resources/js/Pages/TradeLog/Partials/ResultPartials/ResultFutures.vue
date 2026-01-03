@@ -17,29 +17,75 @@ const toggleExpand = (id: number) => {
     }
 };
 
-const isSameDay = (d1: Date, d2: Date) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
-const getWeekNumber = (d: Date) => {
-    const onejan = new Date(d.getFullYear(), 0, 1);
-    return Math.ceil((((d.getTime() - onejan.getTime()) / 86400000) + onejan.getDay() + 1) / 7);
-};
-
 const getDateTime = (dateStr: string, timeStr: string) => {
     if (!dateStr || !timeStr) return null;
     return new Date(`${dateStr}T${timeStr}`);
 };
 
+// [FIX] Helper Date Comparison
+const isSameDay = (d1: Date, d2: Date) => {
+    return d1.getFullYear() === d2.getFullYear() && 
+           d1.getMonth() === d2.getMonth() && 
+           d1.getDate() === d2.getDate();
+};
+
+const isSameMonth = (d1: Date, d2: Date) => {
+    return d1.getFullYear() === d2.getFullYear() && 
+           d1.getMonth() === d2.getMonth();
+};
+
+// [NEW FIX] Logika Minggu yang Akurat (Senin - Minggu)
+const isSameWeek = (date1: Date, date2: Date) => {
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    
+    // Reset jam agar perbandingan murni tanggal
+    d1.setHours(0, 0, 0, 0);
+    d2.setHours(0, 0, 0, 0);
+
+    // Atur Minggu (0) menjadi 7, agar urutannya Senin(1) s/d Minggu(7)
+    const day1 = d1.getDay() || 7; 
+    const day2 = d2.getDay() || 7;
+
+    // Geser kedua tanggal ke hari SENIN terdekat di minggu mereka masing-masing
+    d1.setDate(d1.getDate() - day1 + 1);
+    d2.setDate(d2.getDate() - day2 + 1);
+
+    // Jika Senin-nya jatuh di tanggal yang sama, berarti satu minggu
+    return d1.getTime() === d2.getTime();
+};
+
 // --- FILTER & SORT ---
 const filteredTrades = computed(() => {
     const now = new Date();
+    
     return props.trades
         .filter(t => {
-            const tradeDate = new Date(t.exit_date);
-            if (timeFrame.value === 'TODAY') return isSameDay(tradeDate, now);
-            if (timeFrame.value === 'WEEK') return getWeekNumber(tradeDate) === getWeekNumber(now) && tradeDate.getFullYear() === now.getFullYear();
-            if (timeFrame.value === 'MONTH') return tradeDate.getMonth() === now.getMonth() && tradeDate.getFullYear() === now.getFullYear();
+            if (!t.exit_date) return false;
+            
+            // Konversi exit_date string ke Object Date
+            // Asumsi format t.exit_date adalah "YYYY-MM-DD"
+            // Kita perlu memastikan jam di-set ke 00:00 untuk komparasi tanggal yang aman
+            const tradeDate = new Date(t.exit_date + 'T00:00:00');
+            
+            if (timeFrame.value === 'TODAY') {
+                return isSameDay(tradeDate, now);
+            } 
+            else if (timeFrame.value === 'WEEK') {
+                // Menggunakan logika baru isSameWeek
+                return isSameWeek(tradeDate, now);
+            } 
+            else if (timeFrame.value === 'MONTH') {
+                return isSameMonth(tradeDate, now);
+            }
             return false;
         })
-        .sort((a, b) => new Date(b.exit_date + 'T' + b.exit_time).getTime() - new Date(a.exit_date + 'T' + a.exit_time).getTime());
+        .sort((a, b) => {
+            // Sort Descending (Terbaru diatas)
+            const timeA = new Date(a.exit_date + 'T' + (a.exit_time || '00:00')).getTime();
+            const timeB = new Date(b.exit_date + 'T' + (b.exit_time || '00:00')).getTime();
+            return timeB - timeA;
+        });
 });
 
 // --- METRICS ---

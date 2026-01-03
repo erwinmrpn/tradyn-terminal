@@ -37,7 +37,6 @@ const form = useForm({
 });
 
 // [LOGIC] Kalkulasi Otomatis (Realtime)
-// Menggunakan String() untuk menghindari error TypeScript pada tipe data
 watch([() => form.price, dynamicInput, inputMode, () => form.leverage], ([newPrice, newVal, mode, newLev]) => {
     const price = parseFloat(String(newPrice)) || 0;
     const inputVal = parseFloat(String(newVal)) || 0;
@@ -219,7 +218,7 @@ const submit = () => {
                     <div class="flex gap-2">
                         <div class="flex-1">
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Date</label>
-                            <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none">
+                            <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none cursor-pointer">
                         </div>
                         
                         <div class="w-1/3">
@@ -276,8 +275,9 @@ const submit = () => {
   margin: 0;
 }
 
-/* [PERBAIKAN] Paksa Ikon Jam (Picker) Jadi Putih & Muncul */
-input[type="time"]::-webkit-calendar-picker-indicator {
+/* [PERBAIKAN] Paksa Ikon Jam DAN Tanggal (Picker) Jadi Putih & Muncul */
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(1);
     cursor: pointer;
     opacity: 1;
