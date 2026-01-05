@@ -15,11 +15,9 @@ const expandedFormId = ref<number | null>(null);
 const expandedInfoIds = ref<Set<number>>(new Set()); 
 const isCompressing = ref(false);
 
-// State untuk Smart Form
 const transactionType = ref<'BUY' | 'SELL'>('BUY'); 
 const inputMode = ref<'COIN' | 'USD'>('COIN');
 
-// State Waktu Realtime
 const now = ref(new Date());
 let timer: any;
 
@@ -30,24 +28,13 @@ onUnmounted(() => {
     clearInterval(timer);
 });
 
-// --- HELPERS (Parse Number) ---
+// --- HELPERS ---
 const parseNumber = (val: any) => {
     if (!val) return 0;
     const cleanStr = String(val).replace(/[^0-9.-]/g, '');
     const num = parseFloat(cleanStr);
     return isNaN(num) ? 0 : num;
 };
-
-// --- DATA MAPPERS (FIXED LINK DATA) ---
-const getEntryPrice = (t: any) => t.price || t.entry_price || 0;
-const getQty = (t: any) => t.quantity || t.size || 0;
-const getTargetTP = (t: any) => t.target_sell_price || t.tp_price || t.target_tp || 0;
-const getTargetDCA = (t: any) => t.target_buy_price || t.dca_price || t.target_dca || 0;
-
-// [FIXED] Menambahkan 'buy_notes' karena itu yang dipakai di Index.vue
-const getNote = (t: any) => t.buy_notes || t.entry_notes || t.notes || t.note || t.strategy || null;
-
-const getChartLink = (t: any) => t.buy_screenshot || t.buy_chart || t.entry_screenshot || null;
 
 // --- COMPUTED DATA ---
 const holdingTrades = computed(() => {
@@ -66,6 +53,14 @@ const summaryMetrics = computed(() => {
     return { totalAssets, totalInvested };
 });
 
+// --- DATA MAPPERS ---
+const getEntryPrice = (t: any) => t.price || t.entry_price || 0;
+const getQty = (t: any) => t.quantity || t.size || 0;
+const getTargetTP = (t: any) => t.target_sell_price || t.tp_price || t.target_tp || 0;
+const getTargetDCA = (t: any) => t.target_buy_price || t.dca_price || t.target_dca || 0;
+const getNote = (t: any) => t.buy_notes || t.entry_notes || t.notes || t.note || t.strategy || null;
+const getChartLink = (t: any) => t.buy_screenshot || t.buy_chart || t.entry_screenshot || null;
+
 // --- FORM LOGIC ---
 const form = useForm({
     type: 'BUY', 
@@ -74,7 +69,7 @@ const form = useForm({
     price: '',     
     quantity: '',  
     total_usd: '', 
-    fee: 0,
+    fee: 0, // [FIX] Field Fee sudah ada, tinggal inputnya
     notes: '',
     screenshot: null as File | null,
 });
@@ -110,15 +105,17 @@ const calculationPreview = computed(() => {
     if (!newPrice || !newQty) return null;
 
     if (transactionType.value === 'BUY') {
+        // DCA Calculation
         const totalCostOld = currentQty * currentAvg;
         const totalCostNew = newQty * newPrice;
         const totalQtyFinal = currentQty + newQty;
         const newAverage = (totalCostOld + totalCostNew) / totalQtyFinal;
         return { label: 'New Avg Entry', value: newAverage, isCurrency: true, colorClass: 'text-emerald-400' };
     } else {
+        // PnL Calculation (Kurangi Fee)
         const revenue = newPrice * newQty;
         const cost = currentAvg * newQty;
-        const pnl = revenue - cost - parseNumber(form.fee);
+        const pnl = revenue - cost - parseNumber(form.fee); // [FIX] Fee diperhitungkan
         return { label: 'Est. Realized PnL', value: pnl, isCurrency: true, colorClass: pnl >= 0 ? 'text-emerald-400' : 'text-red-400' };
     }
 });
@@ -168,7 +165,8 @@ const submitTransaction = () => {
     form.post(route('trade.log.transaction.spot', expandedFormId.value), {
         forceFormData: true,
         preserveScroll: true,
-        onSuccess: () => { expandedFormId.value = null; form.reset(); }
+        onSuccess: () => { expandedFormId.value = null; form.reset(); },
+        onError: (errors) => { console.error("Submit Error:", errors); }
     });
 };
 
@@ -308,7 +306,8 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                             </div>
 
                             <form @submit.prevent="submitTransaction">
-                                <div class="space-y-3 mb-3">
+                                
+                                <div class="grid grid-cols-2 gap-3 mb-3">
                                     <div>
                                         <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">
                                             {{ transactionType === 'BUY' ? 'Buy Price' : 'Sell Price' }}
@@ -321,36 +320,43 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                                 placeholder="0.00">
                                         </div>
                                     </div>
-
                                     <div>
-                                        <div class="flex justify-between items-center mb-1">
-                                            <label class="text-[9px] font-bold text-gray-500 uppercase">Amount</label>
-                                            <button type="button" @click="inputMode = inputMode === 'COIN' ? 'USD' : 'COIN'" 
-                                                class="text-[9px] hover:underline flex items-center gap-1 transition-colors"
-                                                :class="transactionType === 'BUY' ? 'text-emerald-500' : 'text-red-500'">
-                                                By {{ inputMode === 'COIN' ? 'USD Value' : 'Coin Qty' }} <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                                            </button>
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">Fee ($)</label>
+                                        <input v-model="form.fee" type="number" step="any" 
+                                            class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none font-mono transition-colors"
+                                            :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                            placeholder="0.00">
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Amount</label>
+                                        <button type="button" @click="inputMode = inputMode === 'COIN' ? 'USD' : 'COIN'" 
+                                            class="text-[9px] hover:underline flex items-center gap-1 transition-colors"
+                                            :class="transactionType === 'BUY' ? 'text-emerald-500' : 'text-red-500'">
+                                            By {{ inputMode === 'COIN' ? 'USD Value' : 'Coin Qty' }} <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                                        </button>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <div class="relative flex-1" v-if="inputMode === 'COIN'">
+                                            <input v-model="form.quantity" type="number" step="any" 
+                                                class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none font-mono transition-colors"
+                                                :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                                placeholder="Qty">
+                                            <span class="absolute right-3 top-2 text-gray-500 text-[10px]">{{ trade.symbol }}</span>
                                         </div>
-                                        <div class="flex gap-2">
-                                            <div class="relative flex-1" v-if="inputMode === 'COIN'">
-                                                <input v-model="form.quantity" type="number" step="any" 
-                                                    class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none font-mono transition-colors"
-                                                    :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
-                                                    placeholder="Qty">
-                                                <span class="absolute right-3 top-2 text-gray-500 text-[10px]">{{ trade.symbol }}</span>
-                                            </div>
-                                            <div class="relative flex-1" v-if="inputMode === 'USD'">
-                                                <span class="absolute left-3 top-2 text-gray-500 text-xs">$</span>
-                                                <input v-model="form.total_usd" type="number" step="any" 
-                                                    class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 pl-6 outline-none font-mono transition-colors"
-                                                    :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
-                                                    placeholder="Total USD">
-                                            </div>
+                                        <div class="relative flex-1" v-if="inputMode === 'USD'">
+                                            <span class="absolute left-3 top-2 text-gray-500 text-xs">$</span>
+                                            <input v-model="form.total_usd" type="number" step="any" 
+                                                class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 pl-6 outline-none font-mono transition-colors"
+                                                :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                                placeholder="Total USD">
                                         </div>
-                                        <div class="text-[9px] text-gray-500 text-right mt-1 font-mono">
-                                            <span v-if="inputMode === 'COIN'">≈ ${{ form.total_usd || '0.00' }}</span>
-                                            <span v-else>≈ {{ form.quantity || '0' }} {{ trade.symbol }}</span>
-                                        </div>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 text-right mt-1 font-mono">
+                                        <span v-if="inputMode === 'COIN'">≈ ${{ form.total_usd || '0.00' }}</span>
+                                        <span v-else>≈ {{ form.quantity || '0' }} {{ trade.symbol }}</span>
                                     </div>
                                 </div>
 
@@ -448,6 +454,16 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
 </template>
 
 <style scoped>
+/* HILANGKAN PANAH INPUT NUMBER */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-in-down { animation: fadeInDown 0.3s ease-out forwards; }
 input[type="date"]::-webkit-calendar-picker-indicator,

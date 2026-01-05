@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\TradingAccount;
 use App\Models\SpotTrade;
 use App\Models\FuturesTrade;
+use Illuminate\Support\Facades\DB;
+use App\Models\SpotTransaction;
 
 class TradeLogController extends Controller
 {
@@ -26,10 +28,6 @@ class TradeLogController extends Controller
             $query = FuturesTrade::query();
         } elseif ($type === 'RESULT') {
             // Tab RESULT: Hanya menampilkan trade yang sudah selesai (CLOSED)
-            // Untuk Futures, status 'CLOSED'. Untuk Spot, status 'SOLD'.
-            // Namun, karena Result Section saat ini dipisah per Tab di Frontend,
-            // query ini mungkin lebih spesifik ke Futures jika sub-tab defaultnya Futures.
-            // Kita biarkan logic ini handle Futures Result dulu.
             $query = FuturesTrade::query()->where('status', 'CLOSED');
         } else {
             // Tab SPOT: Tampilkan semua history spot
@@ -46,8 +44,6 @@ class TradeLogController extends Controller
         }
 
         // --- SORTING DATA ---
-        // Spot: berdasarkan tanggal beli (buy_date)
-        // Futures/Result: berdasarkan tanggal entry atau exit
         $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
         
         $trades = $query->with('tradingAccount')->latest($sortField)->get();
@@ -145,6 +141,7 @@ class TradeLogController extends Controller
                 'price' => 'required|numeric|min:0', // Buy Price
                 'quantity' => 'required|numeric|min:0',
                 'total' => 'required|numeric|min:0', // Total Invested (USDT)
+                'fee' => 'nullable|numeric|min:0',   // [BARU] Validasi Fee
                 'target_sell' => 'nullable|numeric',
                 'target_buy' => 'nullable|numeric',
                 'holding_period' => 'nullable|string',
@@ -153,11 +150,17 @@ class TradeLogController extends Controller
 
             $account = TradingAccount::find($validated['trading_account_id']);
             
+            // [BARU] Hitung Total Biaya (Investasi + Fee)
+            // Asumsi: Fee dibayar dari saldo terpisah (USDT) saat beli
+            $totalCost = $validated['total'] + ($validated['fee'] ?? 0);
+
             // Cek Saldo Spot
-            if ($account->balance < $validated['total']) {
-                return back()->withErrors(['balance' => 'Insufficient balance!']);
+            if ($account->balance < $totalCost) {
+                return back()->withErrors(['balance' => 'Insufficient balance (including fee)!']);
             }
-            $account->decrement('balance', $validated['total']);
+            
+            // Kurangi Saldo
+            $account->decrement('balance', $totalCost);
 
             SpotTrade::create([
                 'trading_account_id' => $validated['trading_account_id'],
@@ -168,6 +171,7 @@ class TradeLogController extends Controller
                 'buy_time' => $validated['time'],
                 'price' => $validated['price'],
                 'quantity' => $validated['quantity'],
+                'fee' => $validated['fee'] ?? 0, // [BARU] Simpan Fee
                 'target_sell_price' => $validated['target_sell'],
                 'target_buy_price' => $validated['target_buy'],
                 'holding_period' => $validated['holding_period'],
@@ -256,12 +260,13 @@ class TradeLogController extends Controller
     }
 
     /**
-     * 5. Sell Asset (SPOT) - NEW FUNCTION
+     * 5. Sell Asset (SPOT) - [LAMA - Masih dipertahankan jika ada request legacy]
+     * Fungsi ini menjual SEMUA aset sekaligus (Full Exit).
+     * Jika Anda sepenuhnya beralih ke Partial Sell di storeTransaction, fungsi ini bisa diabaikan.
      */
     public function sellSpot(Request $request, $id)
     {
         $trade = SpotTrade::findOrFail($id);
-        // Security check
         if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) {
             abort(403, 'Unauthorized action.');
         }
@@ -280,16 +285,10 @@ class TradeLogController extends Controller
             $sellScreenshotPath = $request->file('sell_screenshot')->store('screenshots', 'public');
         }
 
-        // Hitung PnL Spot
-        // Revenue = (Sell Price * Qty) -> Total uang yang didapat dari penjualan
-        // Cost = (Buy Price * Qty) -> Total uang yang dikeluarkan saat beli
-        // PnL = Revenue - Cost - Fee
         $revenue = $validated['sell_price'] * $trade->quantity;
         $cost = $trade->price * $trade->quantity; 
         $pnl = $revenue - $cost - $validated['fee'];
 
-        // Kembalikan dana ke saldo
-        // Saldo bertambah sebesar Revenue dikurangi Fee (karena fee diambil dari hasil jual biasanya)
         $account = TradingAccount::find($trade->trading_account_id);
         $account->increment('balance', ($revenue - $validated['fee']));
 
@@ -323,5 +322,101 @@ class TradeLogController extends Controller
             $trade->delete();
         }
         return redirect()->back()->with('success', 'Trade deleted.');
+    }
+
+    /**
+     * 7. Handle Transaction (DCA / Partial Sell)
+     */
+    public function storeTransaction(Request $request, $id)
+    {
+        // 1. Validasi Input
+        $request->validate([
+            'type' => 'required|in:BUY,SELL',
+            'price' => 'required|numeric',
+            'quantity' => 'required|numeric',
+            'date' => 'required|date',
+            'time' => 'required',
+            'screenshot' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120', 
+        ]);
+
+        // 2. Handle Upload Gambar
+        $screenshotPath = null;
+        if ($request->hasFile('screenshot')) {
+            $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
+        }
+
+        // 3. Gunakan DB Transaction agar aman
+        DB::transaction(function () use ($request, $id, $screenshotPath) {
+            
+            // A. Simpan Riwayat di Tabel Anak (spot_transactions)
+            SpotTransaction::create([
+                'spot_trade_id' => $id,
+                'type' => $request->type,
+                'price' => $request->price,
+                'quantity' => $request->quantity,
+                'fee' => $request->fee ?? 0,
+                'transaction_date' => $request->date,
+                'transaction_time' => $request->time,
+                'notes' => $request->notes,
+                'chart_image' => $screenshotPath, 
+            ]);
+
+            // B. Update Data Induk (spot_trades)
+            $trade = SpotTrade::findOrFail($id);
+            
+            if ($request->type === 'BUY') {
+                // --- LOGIKA DCA (Weighted Average) ---
+                $totalCostOld = $trade->price * $trade->quantity;
+                $totalCostNew = $request->price * $request->quantity;
+                $newQuantity = $trade->quantity + $request->quantity;
+                
+                // Hitung Harga Rata-rata Baru
+                if ($newQuantity > 0) {
+                    $newAvgPrice = ($totalCostOld + $totalCostNew) / $newQuantity;
+                    
+                    $trade->update([
+                        'price' => $newAvgPrice, // Update avg price
+                        'quantity' => $newQuantity // Update total qty
+                    ]);
+                }
+
+                // Kurangi Saldo Akun (Cost + Fee)
+                $account = TradingAccount::find($trade->trading_account_id);
+                $costDCA = ($request->price * $request->quantity) + ($request->fee ?? 0);
+                if ($account) {
+                    $account->decrement('balance', $costDCA);
+                }
+
+            } else {
+                // --- LOGIKA PARTIAL SELL ---
+                $newQuantity = $trade->quantity - $request->quantity;
+                
+                // Jika quantity habis, status jadi SOLD
+                $status = $newQuantity <= 0.00000001 ? 'SOLD' : 'OPEN';
+                
+                // Hitung Realized PnL
+                $revenue = $request->price * $request->quantity;
+                $cost = $trade->price * $request->quantity;
+                $pnlThisTransaction = $revenue - $cost - ($request->fee ?? 0);
+
+                // Tambahkan ke total PnL di induk
+                $newTotalPnL = ($trade->pnl ?? 0) + $pnlThisTransaction;
+
+                $trade->update([
+                    'quantity' => max(0, $newQuantity),
+                    'status' => $status,
+                    'pnl' => $newTotalPnL,
+                    'sell_date' => $request->date, // Update last activity date
+                    'sell_time' => $request->time,
+                ]);
+
+                // Tambah Saldo Akun (Revenue - Fee)
+                $account = TradingAccount::find($trade->trading_account_id);
+                if ($account) {
+                    $account->increment('balance', ($revenue - ($request->fee ?? 0)));
+                }
+            }
+        });
+        return redirect()->back()->with('success', 'Transaction recorded successfully!');
     }
 }

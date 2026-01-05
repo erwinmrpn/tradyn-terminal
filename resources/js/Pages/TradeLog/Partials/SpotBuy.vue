@@ -23,6 +23,7 @@ const form = useForm({
     price: '',
     quantity: '',
     total: '',
+    fee: '', // Fee disimpan di sini
     target_sell: '',
     target_buy: '',
     holding_period: 'Short Term',
@@ -30,6 +31,7 @@ const form = useForm({
     screenshot: null as File | null,
 });
 
+// Smart Input Logic (Price * Qty = Total)
 watch([() => form.price, dynamicInput, inputMode], ([newPrice, newVal, mode]) => {
     const price = parseFloat(String(newPrice)) || 0;
     const inputVal = parseFloat(String(newVal)) || 0;
@@ -73,7 +75,7 @@ const submit = () => {
         forceFormData: true,
         preserveScroll: true,
         onSuccess: () => {
-            form.reset('symbol', 'price', 'quantity', 'total', 'target_sell', 'target_buy', 'notes', 'screenshot');
+            form.reset('symbol', 'price', 'quantity', 'total', 'fee', 'target_sell', 'target_buy', 'notes', 'screenshot');
             form.time = getCurrentTime();
             dynamicInput.value = '';
             
@@ -116,7 +118,6 @@ const submit = () => {
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-4 md:col-span-3">
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Symbol</label>
-                            
                             <input 
                                 :value="form.symbol"
                                 @input="form.symbol = ($event.target as HTMLInputElement).value.toUpperCase()"
@@ -125,7 +126,6 @@ const submit = () => {
                                 class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-lg font-black rounded-lg py-2 px-3 focus:border-emerald-500 outline-none uppercase placeholder-gray-700" 
                                 :class="{'border-red-500': form.errors.symbol}"
                             >
-                            
                             <div v-if="form.errors.symbol" class="text-red-500 text-[9px] mt-1">{{ form.errors.symbol }}</div>
                         </div>
 
@@ -184,6 +184,12 @@ const submit = () => {
                             <input v-model="form.target_buy" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-blue-500 outline-none placeholder-gray-700 font-mono no-spinner" placeholder="Re-entry / Stop">
                         </div>
                     </div>
+
+                    <div>
+                        <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Entry Fee ($)</label>
+                        <input v-model="form.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-sm rounded-lg p-2.5 focus:border-emerald-500 outline-none font-mono no-spinner" placeholder="0.00">
+                    </div>
+
                 </div>
 
                 <div class="lg:col-span-4 flex flex-col gap-4 border-l border-[#1f2128] pl-0 lg:pl-6">
@@ -200,12 +206,13 @@ const submit = () => {
                             </div>
                             <div v-if="form.errors.trading_account_id" class="text-red-500 text-[9px] mt-1">{{ form.errors.trading_account_id }}</div>
                         </div>
-                        <div class="flex gap-2">
-                            <div class="flex-1">
+                        
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
                                 <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Date</label>
                                 <input v-model="form.date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-emerald-500 outline-none cursor-pointer">
                             </div>
-                            <div class="w-1/3">
+                            <div>
                                 <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Time</label>
                                 <input v-model="form.time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-gray-400 text-xs rounded-lg p-2.5 focus:border-emerald-500 outline-none cursor-pointer">
                             </div>

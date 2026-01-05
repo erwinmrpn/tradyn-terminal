@@ -10,6 +10,7 @@ use App\Http\Controllers\AccountTransactionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\TradeLogController;
+use App\Http\Controllers\SpotController;
 
 // --- PUBLIC ROUTES ---
 Route::get('/', function () {
@@ -70,9 +71,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/trade-log/cancel/{id}', [TradeLogController::class, 'cancelPosition'])->name('trade.log.cancel');
 
     // 11. Delete history trade
-
     Route::delete('/trade-log/{id}', [TradeLogController::class, 'destroy'])->name('trade.log.destroy');
 
+    // 12. Fungsi DCA & Multiple Exit
+    Route::post('/trade-log/transaction/spot/{id}', [SpotController::class, 'storeTransaction']) ->name('trade.log.transaction.spot') ->middleware(['auth', 'verified']);
+
+    // 13. Fungsi Spot Transaction
+    
+    // Route untuk transaksi Spot (DCA/Sell)
+    // Menggunakan TradeLogController, method storeTransaction
+Route::post('/trade-log/transaction/spot/{id}', [TradeLogController::class, 'storeTransaction'])
+    ->name('trade.log.transaction.spot')
+    ->middleware(['auth', 'verified']);
 });
 
 require __DIR__.'/auth.php';
