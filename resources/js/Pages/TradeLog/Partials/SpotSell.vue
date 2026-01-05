@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import imageCompression from 'browser-image-compression';
 
 // --- PROPS & EMITS ---
@@ -8,31 +8,119 @@ const props = defineProps<{
     trades: any[] 
 }>();
 
-// Kita emit event ke parent (Index.vue) untuk membuka modal chart
 const emit = defineEmits(['view-chart']);
 
 // --- STATE ---
-const expandedSellId = ref<number | null>(null); // Untuk form Sell
-const expandedInfoIds = ref<Set<number>>(new Set()); // Untuk More Info
+const expandedFormId = ref<number | null>(null); 
+const expandedInfoIds = ref<Set<number>>(new Set()); 
 const isCompressing = ref(false);
 
-// State untuk waktu realtime (Duration)
+// State untuk Smart Form
+const transactionType = ref<'BUY' | 'SELL'>('BUY'); 
+const inputMode = ref<'COIN' | 'USD'>('COIN');
+
+// State Waktu Realtime
 const now = ref(new Date());
 let timer: any;
 
 onMounted(() => {
     timer = setInterval(() => { now.value = new Date(); }, 60000);
 });
-
 onUnmounted(() => {
     clearInterval(timer);
 });
 
-// --- COMPUTED DATA (FILTER OPEN TRADES) ---
+// --- HELPERS (Parse Number) ---
+const parseNumber = (val: any) => {
+    if (!val) return 0;
+    const cleanStr = String(val).replace(/[^0-9.-]/g, '');
+    const num = parseFloat(cleanStr);
+    return isNaN(num) ? 0 : num;
+};
+
+// --- DATA MAPPERS (FIXED LINK DATA) ---
+const getEntryPrice = (t: any) => t.price || t.entry_price || 0;
+const getQty = (t: any) => t.quantity || t.size || 0;
+const getTargetTP = (t: any) => t.target_sell_price || t.tp_price || t.target_tp || 0;
+const getTargetDCA = (t: any) => t.target_buy_price || t.dca_price || t.target_dca || 0;
+
+// [FIXED] Menambahkan 'buy_notes' karena itu yang dipakai di Index.vue
+const getNote = (t: any) => t.buy_notes || t.entry_notes || t.notes || t.note || t.strategy || null;
+
+const getChartLink = (t: any) => t.buy_screenshot || t.buy_chart || t.entry_screenshot || null;
+
+// --- COMPUTED DATA ---
 const holdingTrades = computed(() => {
     return props.trades
-        .filter(t => t.status === 'OPEN') // Hanya ambil yang status OPEN
+        .filter(t => t.status === 'OPEN') 
         .sort((a, b) => new Date(b.buy_date + 'T' + b.buy_time).getTime() - new Date(a.buy_date + 'T' + a.buy_time).getTime());
+});
+
+const summaryMetrics = computed(() => {
+    const trades = holdingTrades.value;
+    const totalAssets = trades.length;
+    const totalInvested = trades.reduce((sum, t) => {
+        const cost = parseNumber(getEntryPrice(t)) * parseNumber(getQty(t));
+        return sum + cost;
+    }, 0);
+    return { totalAssets, totalInvested };
+});
+
+// --- FORM LOGIC ---
+const form = useForm({
+    type: 'BUY', 
+    date: '',
+    time: '',
+    price: '',     
+    quantity: '',  
+    total_usd: '', 
+    fee: 0,
+    notes: '',
+    screenshot: null as File | null,
+});
+
+// --- SMART INPUT LOGIC ---
+watch(() => [form.price, form.quantity], () => {
+    if (inputMode.value === 'COIN') {
+        const p = parseNumber(form.price);
+        const q = parseNumber(form.quantity);
+        if (p && q) form.total_usd = (p * q).toFixed(2);
+    }
+});
+
+watch(() => form.total_usd, (newVal) => {
+    if (inputMode.value === 'USD') {
+        const total = parseNumber(newVal);
+        const p = parseNumber(form.price);
+        if (total && p > 0) form.quantity = (total / p).toFixed(6); 
+    }
+});
+
+// --- ESTIMASI KALKULASI ---
+const calculationPreview = computed(() => {
+    if (!expandedFormId.value) return null;
+    const trade = holdingTrades.value.find(t => t.id === expandedFormId.value);
+    if (!trade) return null;
+
+    const currentQty = parseNumber(getQty(trade));
+    const currentAvg = parseNumber(getEntryPrice(trade));
+    const newPrice = parseNumber(form.price);
+    const newQty = parseNumber(form.quantity);
+
+    if (!newPrice || !newQty) return null;
+
+    if (transactionType.value === 'BUY') {
+        const totalCostOld = currentQty * currentAvg;
+        const totalCostNew = newQty * newPrice;
+        const totalQtyFinal = currentQty + newQty;
+        const newAverage = (totalCostOld + totalCostNew) / totalQtyFinal;
+        return { label: 'New Avg Entry', value: newAverage, isCurrency: true, colorClass: 'text-emerald-400' };
+    } else {
+        const revenue = newPrice * newQty;
+        const cost = currentAvg * newQty;
+        const pnl = revenue - cost - parseNumber(form.fee);
+        return { label: 'Est. Realized PnL', value: pnl, isCurrency: true, colorClass: pnl >= 0 ? 'text-emerald-400' : 'text-red-400' };
+    }
 });
 
 // --- ACTIONS ---
@@ -41,32 +129,26 @@ const toggleInfo = (id: number) => {
     else expandedInfoIds.value.add(id);
 };
 
-const toggleSellForm = (trade: any) => {
-    if (expandedSellId.value === trade.id) {
-        expandedSellId.value = null;
+const toggleManageForm = (trade: any) => {
+    if (expandedFormId.value === trade.id) {
+        expandedFormId.value = null; 
     } else {
-        expandedSellId.value = trade.id;
-        // Reset form saat dibuka
-        formSell.reset();
-        formSell.sell_date = new Date().toISOString().split('T')[0];
-        formSell.sell_time = new Date().toTimeString().slice(0, 5);
-        // Auto fill sell price dengan current market price jika ada (optional)
+        expandedFormId.value = trade.id; 
+        form.reset();
+        transactionType.value = 'BUY'; 
+        form.type = 'BUY';
+        form.date = new Date().toISOString().split('T')[0];
+        form.time = new Date().toTimeString().slice(0, 5);
+        form.price = getEntryPrice(trade); 
     }
 };
 
-const viewChart = (path: string) => {
-    emit('view-chart', path, 'Buy');
+const switchMode = (mode: 'BUY' | 'SELL') => {
+    transactionType.value = mode;
+    form.type = mode;
+    form.quantity = '';
+    form.total_usd = '';
 };
-
-// --- FORM SELL LOGIC (DARI CODE LAMA ANDA) ---
-const formSell = useForm({
-    sell_date: '',
-    sell_time: '',
-    sell_price: '',
-    fee: 0,
-    notes: '',
-    sell_screenshot: null as File | null,
-});
 
 const handleFileChange = async (event: Event) => {
     const target = event.target as HTMLInputElement;
@@ -75,73 +157,50 @@ const handleFileChange = async (event: Event) => {
         try {
             isCompressing.value = true;
             const compressedFile = await imageCompression(file, { maxSizeMB: 0.8, maxWidthOrHeight: 1920 });
-            formSell.sell_screenshot = new File([compressedFile], file.name, { type: file.type });
+            form.screenshot = new File([compressedFile], file.name, { type: file.type });
         } catch (e) { alert("Error compressing image"); } 
         finally { isCompressing.value = false; }
     }
 };
 
-const submitSell = () => {
-    if (!expandedSellId.value || isCompressing.value) return;
-    formSell.post(route('trade.log.sell.spot', expandedSellId.value), {
+const submitTransaction = () => {
+    if (!expandedFormId.value || isCompressing.value) return;
+    form.post(route('trade.log.transaction.spot', expandedFormId.value), {
         forceFormData: true,
         preserveScroll: true,
-        onSuccess: () => { expandedSellId.value = null; formSell.reset(); }
+        onSuccess: () => { expandedFormId.value = null; form.reset(); }
     });
 };
 
-const estimatedPnL = computed(() => {
-    if (!expandedSellId.value || !formSell.sell_price) return 0;
-    const trade = holdingTrades.value.find(t => t.id === expandedSellId.value);
-    if (!trade) return 0;
-    
-    // Rumus: (Sell Price * Qty) - (Buy Price * Qty) - Fee
-    const revenue = parseFloat(formSell.sell_price) * parseFloat(trade.quantity);
-    const cost = parseFloat(trade.price) * parseFloat(trade.quantity);
-    return revenue - cost - parseFloat(formSell.fee.toString() || '0');
-});
-
-// --- FORMATTERS & HELPERS ---
-const parseNumber = (val: any) => {
-    if (!val) return 0;
-    const cleanStr = String(val).replace(/[^0-9.-]/g, '');
-    const num = parseFloat(cleanStr);
-    return isNaN(num) ? 0 : num;
+const viewChart = (path: string) => {
+    emit('view-chart', path, 'Buy');
 };
 
+// --- FORMATTERS ---
 const formatCurrency = (val: any) => {
     const num = parseNumber(val);
     if (num === 0) return '-';
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
 };
-
 const formatNumber = (val: any) => {
     const num = parseNumber(val);
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(num);
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(num);
 };
-
-const calculateTotalValue = (price: any, qty: any) => {
-    return parseNumber(price) * parseNumber(qty);
-};
-
+const calculateTotalValue = (price: any, qty: any) => parseNumber(price) * parseNumber(qty);
 const getHoldingDuration = (dateStr: string, timeStr: string) => {
     if (!dateStr) return '-';
     const dateTimeString = timeStr ? `${dateStr}T${timeStr}` : dateStr;
     const start = new Date(dateTimeString);
     if (isNaN(start.getTime())) return '-';
-
     const diffMs = now.value.getTime() - start.getTime();
     if (diffMs < 0) return 'Just started';
-
     const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-
     let result = '';
     if (days > 0) result += `${days}d `;
     if (hours > 0) result += `${hours}h `;
     result += `${minutes}m`;
-    
     return result || '0m';
 };
 </script>
@@ -154,8 +213,26 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
             <h3 class="text-sm font-bold text-white uppercase tracking-wider">Spot Active Holdings</h3>
         </div>
 
+        <div class="grid grid-cols-2 gap-4 mb-8">
+            <div class="relative group h-full">
+                <div class="p-[2px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.2)] h-full">
+                    <div class="bg-[#121317] rounded-xl p-6 flex flex-col items-center justify-center h-full">
+                        <span class="text-[10px] text-gray-400 font-black uppercase tracking-[0.15em] mb-2">Active Assets</span>
+                        <span class="text-4xl font-black text-white tracking-tight">{{ summaryMetrics.totalAssets }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="relative group h-full">
+                <div class="p-[2px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.2)] h-full">
+                    <div class="bg-[#121317] rounded-xl p-6 flex flex-col items-center justify-center h-full">
+                        <span class="text-[10px] text-gray-400 font-black uppercase tracking-[0.15em] mb-2">Total Invested</span>
+                        <span class="text-4xl font-black text-white tracking-tight">{{ formatCurrency(summaryMetrics.totalInvested) }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
-            
             <div v-for="trade in holdingTrades" :key="trade.id" class="relative group">
                 
                 <div class="p-[2px] rounded-2xl bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.15)] hover:shadow-[0_0_25px_rgba(92,225,230,0.3)] transition-all duration-300 h-full">
@@ -163,7 +240,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                     <div class="bg-[#0f1012] rounded-2xl h-full flex flex-col justify-between overflow-hidden relative">
                         
                         <div class="p-5">
-                            
                             <div class="flex justify-between items-start mb-6">
                                 <div class="flex flex-col">
                                     <div class="flex items-baseline gap-2">
@@ -172,36 +248,27 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                             {{ trade.trading_account?.name || 'SPOT' }}
                                         </span>
                                     </div>
-                                    <div class="mt-1">
+                                    <div class="mt-1 flex gap-1">
                                         <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border border-gray-700 text-gray-400 uppercase">
                                             {{ trade.holding_period || 'SPOT' }}
                                         </span>
                                     </div>
                                 </div>
-                                
-                                <span class="bg-[#ffff00] text-black px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider shadow-[0_0_10px_rgba(255,255,0,0.3)]">
-                                    HOLDING
-                                </span>
+                                <span class="bg-[#ffff00] text-black px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider shadow-[0_0_10px_rgba(255,255,0,0.3)]">HOLDING</span>
                             </div>
 
                             <div class="grid grid-cols-3 gap-3 mb-4 text-center">
                                 <div class="flex flex-col items-center justify-center p-3 rounded-xl bg-[#1a1b20] border border-[#2d2f36]">
                                     <span class="text-[9px] text-gray-500 uppercase font-bold mb-1">Entry Price</span>
-                                    <span class="text-sm font-mono text-white font-bold tracking-wide">
-                                        {{ formatCurrency(trade.price) }}
-                                    </span>
+                                    <span class="text-sm font-mono text-white font-bold tracking-wide">{{ formatCurrency(getEntryPrice(trade)) }}</span>
                                 </div>
                                 <div class="flex flex-col items-center justify-center p-3 rounded-xl bg-[#1a1b20] border border-[#2d2f36]">
                                     <span class="text-[9px] text-green-500 uppercase font-bold mb-1">Target TP</span>
-                                    <span class="text-sm font-mono text-green-400 font-bold tracking-wide">
-                                        {{ formatCurrency(trade.target_sell_price) }}
-                                    </span>
+                                    <span class="text-sm font-mono text-green-400 font-bold tracking-wide">{{ formatCurrency(getTargetTP(trade)) }}</span>
                                 </div>
                                 <div class="flex flex-col items-center justify-center p-3 rounded-xl bg-[#1a1b20] border border-[#2d2f36]">
                                     <span class="text-[9px] text-purple-400 uppercase font-bold mb-1">Target DCA</span>
-                                    <span class="text-sm font-mono text-purple-300 font-bold tracking-wide">
-                                        {{ formatCurrency(trade.target_buy_price) }}
-                                    </span>
+                                    <span class="text-sm font-mono text-purple-300 font-bold tracking-wide">{{ formatCurrency(getTargetDCA(trade)) }}</span>
                                 </div>
                             </div>
 
@@ -216,40 +283,135 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                             <div class="flex justify-between items-end">
                                 <div>
                                     <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Total Value</div>
-                                    <div class="text-2xl font-black text-white tracking-tight">
-                                        {{ formatCurrency(calculateTotalValue(trade.price, trade.quantity)) }}
-                                    </div>
+                                    <div class="text-2xl font-black text-white tracking-tight">{{ formatCurrency(calculateTotalValue(getEntryPrice(trade), getQty(trade))) }}</div>
                                 </div>
                                 <div class="text-right">
                                     <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Quantity</div>
-                                    <div class="text-sm font-mono text-gray-300">
-                                        {{ formatNumber(trade.quantity) }} 
-                                        <span class="text-[10px] text-gray-500 font-bold ml-0.5">{{ trade.symbol }}</span>
-                                    </div>
+                                    <div class="text-sm font-mono text-gray-300">{{ formatNumber(getQty(trade)) }} <span class="text-[10px] text-gray-500 font-bold ml-0.5">{{ trade.symbol }}</span></div>
                                 </div>
                             </div>
+                        </div>
 
+                        <div v-if="expandedFormId === trade.id" class="bg-[#1a1b20] p-5 border-t border-b border-[#2d2f36] animate-fade-in-down relative">
+                            
+                            <div class="flex p-1 bg-[#0f1012] rounded-lg mb-4 border border-[#2d2f36]">
+                                <button @click="switchMode('BUY')" 
+                                    class="flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded transition-all"
+                                    :class="transactionType === 'BUY' ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(5,150,105,0.4)]' : 'text-gray-500 hover:text-gray-300'">
+                                    Buy More / DCA
+                                </button>
+                                <button @click="switchMode('SELL')"
+                                    class="flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded transition-all"
+                                    :class="transactionType === 'SELL' ? 'bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.4)]' : 'text-gray-500 hover:text-gray-300'">
+                                    Sell / Exit
+                                </button>
+                            </div>
+
+                            <form @submit.prevent="submitTransaction">
+                                <div class="space-y-3 mb-3">
+                                    <div>
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">
+                                            {{ transactionType === 'BUY' ? 'Buy Price' : 'Sell Price' }}
+                                        </label>
+                                        <div class="relative">
+                                            <span class="absolute left-3 top-2 text-gray-500 text-xs">$</span>
+                                            <input v-model="form.price" type="number" step="any" 
+                                                class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 pl-6 outline-none font-mono transition-colors"
+                                                :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                                placeholder="0.00">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div class="flex justify-between items-center mb-1">
+                                            <label class="text-[9px] font-bold text-gray-500 uppercase">Amount</label>
+                                            <button type="button" @click="inputMode = inputMode === 'COIN' ? 'USD' : 'COIN'" 
+                                                class="text-[9px] hover:underline flex items-center gap-1 transition-colors"
+                                                :class="transactionType === 'BUY' ? 'text-emerald-500' : 'text-red-500'">
+                                                By {{ inputMode === 'COIN' ? 'USD Value' : 'Coin Qty' }} <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                                            </button>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <div class="relative flex-1" v-if="inputMode === 'COIN'">
+                                                <input v-model="form.quantity" type="number" step="any" 
+                                                    class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none font-mono transition-colors"
+                                                    :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                                    placeholder="Qty">
+                                                <span class="absolute right-3 top-2 text-gray-500 text-[10px]">{{ trade.symbol }}</span>
+                                            </div>
+                                            <div class="relative flex-1" v-if="inputMode === 'USD'">
+                                                <span class="absolute left-3 top-2 text-gray-500 text-xs">$</span>
+                                                <input v-model="form.total_usd" type="number" step="any" 
+                                                    class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 pl-6 outline-none font-mono transition-colors"
+                                                    :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'"
+                                                    placeholder="Total USD">
+                                            </div>
+                                        </div>
+                                        <div class="text-[9px] text-gray-500 text-right mt-1 font-mono">
+                                            <span v-if="inputMode === 'COIN'">≈ ${{ form.total_usd || '0.00' }}</span>
+                                            <span v-else>≈ {{ form.quantity || '0' }} {{ trade.symbol }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-3 mb-3">
+                                    <div>
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">Date</label>
+                                        <input v-model="form.date" type="date" 
+                                            class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none transition-colors"
+                                            :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'">
+                                    </div>
+                                    <div>
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">Time</label>
+                                        <input v-model="form.time" type="time" 
+                                            class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 outline-none transition-colors"
+                                            :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'">
+                                    </div>
+                                </div>
+
+                                <div v-if="calculationPreview" class="flex justify-between items-center bg-[#0a0b0d] p-3 rounded border border-[#2d2f36] mb-3">
+                                    <span class="text-[10px] text-gray-500 font-bold uppercase">{{ calculationPreview.label }}</span>
+                                    <span class="text-sm font-black font-mono" :class="calculationPreview.colorClass">
+                                        {{ calculationPreview.isCurrency ? formatCurrency(calculationPreview.value) : calculationPreview.value }}
+                                    </span>
+                                </div>
+
+                                <div class="flex gap-2 mb-3">
+                                    <input type="text" v-model="form.notes" :placeholder="transactionType === 'BUY' ? 'DCA Reason...' : 'Sell Reason...'" 
+                                        class="flex-1 bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded p-2 outline-none transition-colors"
+                                        :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'">
+                                    
+                                    <label class="flex items-center justify-center w-10 bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer text-gray-400 hover:text-white transition-colors hover:border-gray-500">
+                                        <span class="text-xs">{{ form.screenshot ? '📷' : '+' }}</span>
+                                        <input type="file" @change="handleFileChange" accept="image/*" class="hidden">
+                                    </label>
+                                </div>
+
+                                <button type="submit" :disabled="form.processing" 
+                                    class="w-full py-2.5 rounded text-white text-xs font-black uppercase tracking-wider transition-colors shadow-lg"
+                                    :class="transactionType === 'BUY' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_0_15px_rgba(5,150,105,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'">
+                                    CONFIRM {{ transactionType }}
+                                </button>
+                            </form>
                         </div>
 
                         <div v-if="expandedInfoIds.has(trade.id)" class="bg-[#0a0b0d] p-5 border-t border-[#2d2f36] animate-fade-in-down">
                             <div class="mb-3">
                                 <h4 class="text-[10px] text-blue-400 uppercase font-bold mb-1">Strategy / Notes</h4>
                                 <div class="text-xs text-gray-300 italic leading-relaxed bg-[#1a1b20] p-2 rounded border border-[#2d2f36]">
-                                    {{ trade.buy_notes || 'No notes available.' }}
+                                    {{ getNote(trade) || 'No notes available.' }}
                                 </div>
                             </div>
-                            
                             <div class="flex justify-between items-center mt-2 border-t border-[#2d2f36] pt-2">
                                 <div>
                                     <h4 class="text-[9px] text-gray-500 uppercase font-bold mb-1">Chart Analysis</h4>
-                                    <button v-if="trade.buy_screenshot" 
-                                       @click="viewChart(trade.buy_screenshot)"
+                                    <button v-if="getChartLink(trade)" 
+                                       @click="viewChart(getChartLink(trade))"
                                        class="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-[#5ce1e6]/10 text-[#5ce1e6] text-[10px] font-bold border border-[#5ce1e6]/30 hover:bg-[#5ce1e6]/20 transition-colors">
                                         View Chart <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                                     </button>
                                     <span v-else class="text-[10px] text-gray-600 italic">No chart linked</span>
                                 </div>
-                                
                                 <div class="text-right">
                                     <h4 class="text-[9px] text-gray-500 uppercase font-bold">Buy Date</h4>
                                     <span class="text-[10px] text-gray-400 font-mono">{{ trade.buy_date }}</span>
@@ -257,60 +419,11 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                             </div>
                         </div>
 
-                        <div v-if="expandedSellId === trade.id" class="bg-[#1a1b20] p-5 border-t border-b border-[#2d2f36] animate-fade-in-down">
-                            <h4 class="text-xs font-black text-white uppercase mb-3 flex items-center gap-2">
-                                <span class="w-2 h-2 rounded-full bg-blue-500"></span> Close Position (Sell)
-                            </h4>
-                            <form @submit.prevent="submitSell">
-                                <div class="grid grid-cols-2 gap-3 mb-3">
-                                    <div>
-                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Sell Price</label>
-                                        <input v-model="formSell.sell_price" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 focus:border-blue-500 outline-none font-mono" placeholder="0.00" required>
-                                    </div>
-                                    <div>
-                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Fee</label>
-                                        <input v-model="formSell.fee" type="number" step="any" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 focus:border-blue-500 outline-none" placeholder="0.00">
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-3 mb-3">
-                                    <div>
-                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Date</label>
-                                        <input v-model="formSell.sell_date" type="date" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 focus:border-blue-500 outline-none" required>
-                                    </div>
-                                    <div>
-                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Time</label>
-                                        <input v-model="formSell.sell_time" type="time" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded p-2 focus:border-blue-500 outline-none" required>
-                                    </div>
-                                </div>
-
-                                <div class="flex justify-between items-center bg-[#0a0b0d] p-2 rounded border border-[#2d2f36] mb-3">
-                                    <span class="text-[10px] text-gray-500 font-bold uppercase">Est. PnL</span>
-                                    <span class="text-sm font-black font-mono" :class="estimatedPnL >= 0 ? 'text-emerald-500' : 'text-red-500'">{{ estimatedPnL >= 0 ? '+' : '' }}{{ formatCurrency(estimatedPnL) }}</span>
-                                </div>
-
-                                <div class="flex gap-2 mb-3">
-                                    <input type="text" v-model="formSell.notes" placeholder="Sell Reason..." class="flex-1 bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded p-2 outline-none focus:border-blue-500">
-                                    <label class="flex items-center justify-center w-10 bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer hover:border-blue-500 text-gray-400 hover:text-white transition-colors">
-                                        <span class="text-xs">{{ formSell.sell_screenshot ? '📷' : '+' }}</span>
-                                        <input type="file" @change="handleFileChange" accept="image/*" class="hidden">
-                                    </label>
-                                </div>
-
-                                <button type="submit" :disabled="formSell.processing" class="w-full py-2.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-blue-900/20">
-                                    CONFIRM SELL
-                                </button>
-                            </form>
-                        </div>
-
-                        <div class="grid grid-cols-2 border-t border-[#2d2f36]">
-                            <div class="py-4 bg-[#121317] text-gray-600 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 border-r border-[#2d2f36] cursor-not-allowed opacity-50">
-                                Buy More / DCA
-                            </div>
-                            
-                            <button @click="toggleSellForm(trade)" 
-                                class="py-4 text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                                :class="expandedSellId === trade.id ? 'bg-blue-600 text-white' : 'bg-[#121317] hover:bg-[#5ce1e6] hover:text-black text-[#5ce1e6]'">
-                                {{ expandedSellId === trade.id ? 'CANCEL' : 'SELL' }}
+                        <div class="border-t border-[#2d2f36]">
+                            <button @click="toggleManageForm(trade)" 
+                                class="w-full py-4 text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 bg-[#121317] hover:bg-[#1a1b20] text-gray-400 hover:text-white group-hover:text-[#5ce1e6]">
+                                {{ expandedFormId === trade.id ? 'CLOSE FORM' : 'MANAGE POSITION' }}
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
                             </button>
                         </div>
 
