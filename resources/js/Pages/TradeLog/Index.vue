@@ -186,7 +186,7 @@ const getHoldingClass = (period: string) => {
                         </div>
                     </div>
                     <SpotBuy v-if="spotTab === 'BUY'" :accounts="filteredAccounts" />
-                    <SpotSell v-else :trades="props.trades" />
+                    <SpotSell v-else :trades="props.trades" @view-chart="openImageModal"/>
                 </div>
 
                 <div v-if="props.activeType === 'FUTURES'">
