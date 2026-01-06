@@ -15,22 +15,24 @@ class SpotTrade extends Model
         'market_type',
         'status', // OPEN / SOLD
         
-        // Buy Data
+        // Buy Data (Initial Entry)
         'buy_date',
         'buy_time',
-        'price', // Entry Price (Akan terupdate otomatis saat DCA/Average Down)
-        'quantity', // Total Quantity (Akan bertambah saat DCA, berkurang saat Partial Sell)
+        'price',    // Avg Entry Price (Berubah saat DCA, Tetap saat Partial Sell)
+        'quantity', // Sisa Quantity saat ini
         'target_sell_price',
         'target_buy_price',
         'holding_period',
         'buy_screenshot',
         'buy_notes',
 
-        // Sell Data (Data Final saat posisi closed sepenuhnya)
-        'sell_date',
+        // Summary Sell Data (Rangkuman)
+        // Kolom detail seperti sell_price/notes/screenshot dihapus dari sini 
+        // karena sudah dicatat detailnya di tabel spot_transactions.
+        'sell_date', // Untuk sorting "Last Activity"
         'sell_time',
-        'fee',
-        'pnl', // Realized PnL
+        'fee',       // Akumulasi Fee (jika diperlukan)
+        'pnl',       // Realized PnL (Akumulasi Profit/Loss yang sudah diamankan)
     ];
 
     /**
@@ -42,13 +44,11 @@ class SpotTrade extends Model
     }
 
     /**
-     * [BARU] Relasi ke History Transaksi (Child)
-     * Menghubungkan SpotTrade (Induk) ke tabel spot_transactions.
-     * Digunakan untuk melihat riwayat: Kapan DCA? Kapan Jual Sebagian?
+     * Relasi ke History Transaksi (Child)
+     * Menampung riwayat DCA (Buy) dan Partial Exit (Sell)
      */
     public function transactions()
     {
-        // Pastikan Anda sudah membuat model App\Models\SpotTransaction
         return $this->hasMany(SpotTransaction::class, 'spot_trade_id');
     }
 }

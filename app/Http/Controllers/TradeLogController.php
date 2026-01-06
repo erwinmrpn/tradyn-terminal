@@ -15,7 +15,6 @@ class TradeLogController extends Controller
 {
     /**
      * 1. Menampilkan Halaman Trade Log
-     * Mengatur data untuk Tab SPOT, FUTURES, dan RESULT
      */
     public function index(Request $request)
     {
@@ -27,10 +26,8 @@ class TradeLogController extends Controller
         if ($type === 'FUTURES') {
             $query = FuturesTrade::query();
         } elseif ($type === 'RESULT') {
-            // Tab RESULT: Hanya menampilkan trade yang sudah selesai (CLOSED)
             $query = FuturesTrade::query()->where('status', 'CLOSED');
         } else {
-            // Tab SPOT: Tampilkan semua history spot
             $query = SpotTrade::query();
         }
 
@@ -49,7 +46,7 @@ class TradeLogController extends Controller
         $trades = $query->with('tradingAccount')->latest($sortField)->get();
         $accounts = $user->tradingAccounts;
 
-        // --- HITUNG BALANCE TERPISAH ---
+        // --- HITUNG BALANCE ---
         $spotBalance = $user->tradingAccounts()->where('strategy_type', 'SPOT')->sum('balance');
         $futuresBalance = $user->tradingAccounts()->where('strategy_type', 'FUTURES')->sum('balance');
         $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
@@ -68,7 +65,6 @@ class TradeLogController extends Controller
 
     /**
      * 2. Menyimpan Transaksi Baru (Entry / Buy)
-     * Handle Form SPOT (Buy) dan Form FUTURES (Open Position)
      */
     public function store(Request $request)
     {
@@ -85,8 +81,8 @@ class TradeLogController extends Controller
             
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
-                'date' => 'required|date', // entry_date
-                'time' => 'required',      // entry_time
+                'date' => 'required|date',
+                'time' => 'required',
                 'type' => 'required|in:LONG,SHORT',
                 'symbol' => 'required|string',
                 'market_type' => 'required|string',
@@ -138,10 +134,10 @@ class TradeLogController extends Controller
                 'market_type' => 'required|string',
                 'date' => 'required|date',
                 'time' => 'required',
-                'price' => 'required|numeric|min:0', // Buy Price
+                'price' => 'required|numeric|min:0', 
                 'quantity' => 'required|numeric|min:0',
-                'total' => 'required|numeric|min:0', // Total Invested (USDT)
-                'fee' => 'nullable|numeric|min:0',   // [BARU] Validasi Fee
+                'total' => 'required|numeric|min:0', 
+                'fee' => 'nullable|numeric|min:0',   
                 'target_sell' => 'nullable|numeric',
                 'target_buy' => 'nullable|numeric',
                 'holding_period' => 'nullable|string',
@@ -150,16 +146,12 @@ class TradeLogController extends Controller
 
             $account = TradingAccount::find($validated['trading_account_id']);
             
-            // [BARU] Hitung Total Biaya (Investasi + Fee)
-            // Asumsi: Fee dibayar dari saldo terpisah (USDT) saat beli
+            // Hitung Total Biaya (Investasi + Fee)
             $totalCost = $validated['total'] + ($validated['fee'] ?? 0);
 
-            // Cek Saldo Spot
             if ($account->balance < $totalCost) {
                 return back()->withErrors(['balance' => 'Insufficient balance (including fee)!']);
             }
-            
-            // Kurangi Saldo
             $account->decrement('balance', $totalCost);
 
             SpotTrade::create([
@@ -171,7 +163,7 @@ class TradeLogController extends Controller
                 'buy_time' => $validated['time'],
                 'price' => $validated['price'],
                 'quantity' => $validated['quantity'],
-                'fee' => $validated['fee'] ?? 0, // [BARU] Simpan Fee
+                'fee' => $validated['fee'] ?? 0, 
                 'target_sell_price' => $validated['target_sell'],
                 'target_buy_price' => $validated['target_buy'],
                 'holding_period' => $validated['holding_period'],
@@ -260,54 +252,7 @@ class TradeLogController extends Controller
     }
 
     /**
-     * 5. Sell Asset (SPOT) - [LAMA - Masih dipertahankan jika ada request legacy]
-     * Fungsi ini menjual SEMUA aset sekaligus (Full Exit).
-     * Jika Anda sepenuhnya beralih ke Partial Sell di storeTransaction, fungsi ini bisa diabaikan.
-     */
-    public function sellSpot(Request $request, $id)
-    {
-        $trade = SpotTrade::findOrFail($id);
-        if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) {
-            abort(403, 'Unauthorized action.');
-        }
-
-        $validated = $request->validate([
-            'sell_date' => 'required|date',
-            'sell_time' => 'required',
-            'sell_price' => 'required|numeric|min:0',
-            'fee' => 'required|numeric|min:0',
-            'notes' => 'nullable|string',
-            'sell_screenshot' => 'nullable|image|max:5120',
-        ]);
-
-        $sellScreenshotPath = null;
-        if ($request->hasFile('sell_screenshot')) {
-            $sellScreenshotPath = $request->file('sell_screenshot')->store('screenshots', 'public');
-        }
-
-        $revenue = $validated['sell_price'] * $trade->quantity;
-        $cost = $trade->price * $trade->quantity; 
-        $pnl = $revenue - $cost - $validated['fee'];
-
-        $account = TradingAccount::find($trade->trading_account_id);
-        $account->increment('balance', ($revenue - $validated['fee']));
-
-        $trade->update([
-            'status' => 'SOLD',
-            'sell_date' => $validated['sell_date'],
-            'sell_time' => $validated['sell_time'],
-            'sell_price' => $validated['sell_price'],
-            'fee' => $validated['fee'],
-            'pnl' => $pnl,
-            'sell_notes' => $validated['notes'],
-            'sell_screenshot' => $sellScreenshotPath,
-        ]);
-
-        return redirect()->back()->with('success', 'Spot asset sold successfully.');
-    }
-
-    /**
-     * 6. Hapus Data Trade (Delete)
+     * 5. Hapus Data Trade (Delete)
      */
     public function destroy(Request $request, $id)
     {
@@ -325,7 +270,8 @@ class TradeLogController extends Controller
     }
 
     /**
-     * 7. Handle Transaction (DCA / Partial Sell)
+     * 6. Handle Transaction (DCA / Partial Sell)
+     * Menggantikan fungsi sellSpot lama dengan logika yang lebih canggih.
      */
     public function storeTransaction(Request $request, $id)
     {
@@ -375,8 +321,8 @@ class TradeLogController extends Controller
                     $newAvgPrice = ($totalCostOld + $totalCostNew) / $newQuantity;
                     
                     $trade->update([
-                        'price' => $newAvgPrice, // Update avg price
-                        'quantity' => $newQuantity // Update total qty
+                        'price' => $newAvgPrice, // Update avg price (HANYA SAAT BUY/DCA)
+                        'quantity' => $newQuantity 
                     ]);
                 }
 
@@ -389,24 +335,22 @@ class TradeLogController extends Controller
 
             } else {
                 // --- LOGIKA PARTIAL SELL ---
-                $newQuantity = $trade->quantity - $request->quantity;
+                // Sisa holding tetap pakai avg price yang sama (PRICE TIDAK DI UPDATE DI SINI)
                 
-                // Jika quantity habis, status jadi SOLD
+                $newQuantity = $trade->quantity - $request->quantity;
                 $status = $newQuantity <= 0.00000001 ? 'SOLD' : 'OPEN';
                 
-                // Hitung Realized PnL
+                // Hitung Realized PnL (Cost Basis yang terealisasi)
                 $revenue = $request->price * $request->quantity;
-                $cost = $trade->price * $request->quantity;
+                $cost = $trade->price * $request->quantity; // Menggunakan Avg Price saat ini
                 $pnlThisTransaction = $revenue - $cost - ($request->fee ?? 0);
 
-                // Tambahkan ke total PnL di induk
-                $newTotalPnL = ($trade->pnl ?? 0) + $pnlThisTransaction;
-
+                // Update DB Induk
                 $trade->update([
-                    'quantity' => max(0, $newQuantity),
+                    'quantity' => max(0, $newQuantity), // Hanya kurangi quantity
                     'status' => $status,
-                    'pnl' => $newTotalPnL,
-                    'sell_date' => $request->date, // Update last activity date
+                    'pnl' => ($trade->pnl ?? 0) + $pnlThisTransaction, // Update total PnL
+                    'sell_date' => $request->date, // Update last activity
                     'sell_time' => $request->time,
                 ]);
 
