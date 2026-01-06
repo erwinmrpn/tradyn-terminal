@@ -252,21 +252,60 @@ class TradeLogController extends Controller
     }
 
     /**
-     * 5. Hapus Data Trade (Delete)
+     * 5. Hapus Data Trade (Delete) dengan Rollback Saldo
      */
     public function destroy(Request $request, $id)
     {
         $type = $request->input('type');
-        if ($type === 'FUTURES') {
-            $trade = FuturesTrade::findOrFail($id);
-            if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) abort(403);
-            $trade->delete();
-        } else {
-            $trade = SpotTrade::findOrFail($id);
-            if (Auth::user()->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) abort(403);
-            $trade->delete();
-        }
-        return redirect()->back()->with('success', 'Trade deleted.');
+        $user = Auth::user();
+
+        return DB::transaction(function () use ($id, $type, $user) {
+            if ($type === 'FUTURES') {
+                $trade = FuturesTrade::findOrFail($id);
+                if ($user->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) abort(403);
+                if ($trade->status === 'OPEN') {
+                    TradingAccount::where('id', $trade->trading_account_id)->increment('balance', $trade->margin);
+                }
+                $trade->delete();
+            } else {
+                // Eager load transactions untuk akurasi fee
+                $trade = SpotTrade::with('transactions')->findOrFail($id);
+                if ($user->tradingAccounts()->where('id', $trade->trading_account_id)->doesntExist()) abort(403);
+
+                $account = TradingAccount::find($trade->trading_account_id);
+
+                // Jika status sudah SOLD, saldo sudah akurat, tidak perlu refund.
+                // Refund hanya dilakukan jika masih ada aset atau status OPEN.
+                if ($trade->status !== 'SOLD') {
+                    
+                    // 1. Hitung Nilai Aset yang Masih Tertanam (Current Cost Basis)
+                    $currentValue = $trade->quantity * $trade->price;
+
+                    // 2. Ambil Fee Awal (dari tabel induk)
+                    $initialFee = $trade->fee;
+
+                    // 3. Hitung Semua Fee dari DCA (dari tabel transaksi)
+                    $totalDcaFee = $trade->transactions->where('type', 'BUY')->sum('fee');
+
+                    // 4. Ambil Total PnL yang sudah terealisasi (yang sudah masuk ke balance saat sell)
+                    $realizedPnL = $trade->pnl ?? 0;
+
+                    // Rumus: Kembalikan modal sisa + semua biaya beli - profit yang sudah diterima
+                    $netToRefund = ($currentValue + $initialFee + $totalDcaFee) - $realizedPnL;
+
+                    if ($netToRefund > 0) {
+                        $account->increment('balance', $netToRefund);
+                    } elseif ($netToRefund < 0) {
+                        // Jika ternyata minus (karena profit sangat besar), maka balance dikurangi
+                        $account->decrement('balance', abs($netToRefund));
+                    }
+                }
+
+                $trade->delete();
+            }
+
+            return redirect()->back()->with('success', 'History deleted and balance adjusted.');
+        });
     }
 
     /**
