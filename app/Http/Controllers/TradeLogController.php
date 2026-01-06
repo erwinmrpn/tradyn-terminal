@@ -15,6 +15,7 @@ class TradeLogController extends Controller
 {
     /**
      * 1. Menampilkan Halaman Trade Log
+     * Mengatur data untuk Tab SPOT, FUTURES, dan RESULT
      */
     public function index(Request $request)
     {
@@ -26,8 +27,10 @@ class TradeLogController extends Controller
         if ($type === 'FUTURES') {
             $query = FuturesTrade::query();
         } elseif ($type === 'RESULT') {
+            // Tab RESULT: Hanya menampilkan trade yang sudah selesai (CLOSED)
             $query = FuturesTrade::query()->where('status', 'CLOSED');
         } else {
+            // Tab SPOT: Tampilkan semua history spot
             $query = SpotTrade::query();
         }
 
@@ -43,10 +46,16 @@ class TradeLogController extends Controller
         // --- SORTING DATA ---
         $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
         
-        $trades = $query->with('tradingAccount')->latest($sortField)->get();
+        /**
+         * [PERBAIKAN] Eager Loading relasi 'transactions'.
+         * Menambahkan 'transactions' ke dalam with() agar data DCA/Sell parsial 
+         * terkirim ke frontend untuk perhitungan Accumulative Fees.
+         */
+        $trades = $query->with(['tradingAccount', 'transactions'])->latest($sortField)->get();
+        
         $accounts = $user->tradingAccounts;
 
-        // --- HITUNG BALANCE ---
+        // --- HITUNG BALANCE TERPISAH ---
         $spotBalance = $user->tradingAccounts()->where('strategy_type', 'SPOT')->sum('balance');
         $futuresBalance = $user->tradingAccounts()->where('strategy_type', 'FUTURES')->sum('balance');
         $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
@@ -65,6 +74,7 @@ class TradeLogController extends Controller
 
     /**
      * 2. Menyimpan Transaksi Baru (Entry / Buy)
+     * Handle Form SPOT (Buy) dan Form FUTURES (Open Position)
      */
     public function store(Request $request)
     {
@@ -81,8 +91,8 @@ class TradeLogController extends Controller
             
             $validated = $request->validate([
                 'trading_account_id' => 'required|exists:trading_accounts,id',
-                'date' => 'required|date',
-                'time' => 'required',
+                'date' => 'required|date', // entry_date
+                'time' => 'required',      // entry_time
                 'type' => 'required|in:LONG,SHORT',
                 'symbol' => 'required|string',
                 'market_type' => 'required|string',
@@ -134,10 +144,10 @@ class TradeLogController extends Controller
                 'market_type' => 'required|string',
                 'date' => 'required|date',
                 'time' => 'required',
-                'price' => 'required|numeric|min:0', 
+                'price' => 'required|numeric|min:0', // Buy Price
                 'quantity' => 'required|numeric|min:0',
-                'total' => 'required|numeric|min:0', 
-                'fee' => 'nullable|numeric|min:0',   
+                'total' => 'required|numeric|min:0', // Total Invested (USDT)
+                'fee' => 'nullable|numeric|min:0',   // [BARU] Validasi Fee
                 'target_sell' => 'nullable|numeric',
                 'target_buy' => 'nullable|numeric',
                 'holding_period' => 'nullable|string',
@@ -146,12 +156,16 @@ class TradeLogController extends Controller
 
             $account = TradingAccount::find($validated['trading_account_id']);
             
-            // Hitung Total Biaya (Investasi + Fee)
+            // [BARU] Hitung Total Biaya (Investasi + Fee)
+            // Asumsi: Fee dibayar dari saldo terpisah (USDT) saat beli
             $totalCost = $validated['total'] + ($validated['fee'] ?? 0);
 
+            // Cek Saldo Spot
             if ($account->balance < $totalCost) {
                 return back()->withErrors(['balance' => 'Insufficient balance (including fee)!']);
             }
+            
+            // Kurangi Saldo
             $account->decrement('balance', $totalCost);
 
             SpotTrade::create([
@@ -163,7 +177,7 @@ class TradeLogController extends Controller
                 'buy_time' => $validated['time'],
                 'price' => $validated['price'],
                 'quantity' => $validated['quantity'],
-                'fee' => $validated['fee'] ?? 0, 
+                'fee' => $validated['fee'] ?? 0, // [BARU] Simpan Fee
                 'target_sell_price' => $validated['target_sell'],
                 'target_buy_price' => $validated['target_buy'],
                 'holding_period' => $validated['holding_period'],
@@ -327,6 +341,7 @@ class TradeLogController extends Controller
         // 2. Handle Upload Gambar
         $screenshotPath = null;
         if ($request->hasFile('screenshot')) {
+            $request->validate(['screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120']);
             $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
         }
 

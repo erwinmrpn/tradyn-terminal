@@ -36,6 +36,16 @@ const parseNumber = (val: any) => {
     return isNaN(num) ? 0 : num;
 };
 
+// Fungsi helper untuk menghitung akumulasi fee per trade (Awal + Semua DCA + Semua Sells)
+const getTotalFeePaid = (trade: any) => {
+    const initialFee = parseNumber(trade.fee);
+    // Menghitung total fee dari semua transaksi yang ada di tabel anak
+    const transactionFees = trade.transactions ? trade.transactions.reduce((sum: number, t: any) => {
+        return sum + parseNumber(t.fee);
+    }, 0) : 0;
+    return initialFee + transactionFees;
+};
+
 // --- COMPUTED DATA ---
 const holdingTrades = computed(() => {
     return props.trades
@@ -46,10 +56,18 @@ const holdingTrades = computed(() => {
 const summaryMetrics = computed(() => {
     const trades = holdingTrades.value;
     const totalAssets = trades.length;
+    
+    // [FIX] Total Invested = (Qty * Current Avg Price) + Seluruh Accumulative Fee (Awal + DCA + Sells)
     const totalInvested = trades.reduce((sum, t) => {
-        const cost = parseNumber(getEntryPrice(t)) * parseNumber(getQty(t));
-        return sum + cost;
+        const currentQty = parseNumber(getQty(t));
+        const avgPrice = parseNumber(getEntryPrice(t));
+        const netCost = currentQty * avgPrice;
+        
+        const accumulativeFee = getTotalFeePaid(t);
+        
+        return sum + netCost + accumulativeFee;
     }, 0);
+    
     return { totalAssets, totalInvested };
 });
 
@@ -69,7 +87,7 @@ const form = useForm({
     price: '',     
     quantity: '',  
     total_usd: '', 
-    fee: 0, // [FIX] Field Fee sudah ada, tinggal inputnya
+    fee: 0, 
     notes: '',
     screenshot: null as File | null,
 });
@@ -87,7 +105,7 @@ watch(() => form.total_usd, (newVal) => {
     if (inputMode.value === 'USD') {
         const total = parseNumber(newVal);
         const p = parseNumber(form.price);
-        if (total && p > 0) form.quantity = (total / p).toFixed(6); 
+        if (total && p > 0) form.quantity = (total / p).toFixed(8); 
     }
 });
 
@@ -105,17 +123,15 @@ const calculationPreview = computed(() => {
     if (!newPrice || !newQty) return null;
 
     if (transactionType.value === 'BUY') {
-        // DCA Calculation
         const totalCostOld = currentQty * currentAvg;
         const totalCostNew = newQty * newPrice;
         const totalQtyFinal = currentQty + newQty;
         const newAverage = (totalCostOld + totalCostNew) / totalQtyFinal;
         return { label: 'New Avg Entry', value: newAverage, isCurrency: true, colorClass: 'text-emerald-400' };
     } else {
-        // PnL Calculation (Kurangi Fee)
         const revenue = newPrice * newQty;
         const cost = currentAvg * newQty;
-        const pnl = revenue - cost - parseNumber(form.fee); // [FIX] Fee diperhitungkan
+        const pnl = revenue - cost - parseNumber(form.fee); 
         return { label: 'Est. Realized PnL', value: pnl, isCurrency: true, colorClass: pnl >= 0 ? 'text-emerald-400' : 'text-red-400' };
     }
 });
@@ -223,7 +239,7 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
             <div class="relative group h-full">
                 <div class="p-[2px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.2)] h-full">
                     <div class="bg-[#121317] rounded-xl p-6 flex flex-col items-center justify-center h-full">
-                        <span class="text-[10px] text-gray-400 font-black uppercase tracking-[0.15em] mb-2">Total Invested</span>
+                        <span class="text-[10px] text-gray-400 font-black uppercase tracking-[0.15em] mb-2">Total Invested (Inc. Fee)</span>
                         <span class="text-4xl font-black text-white tracking-tight">{{ formatCurrency(summaryMetrics.totalInvested) }}</span>
                     </div>
                 </div>
@@ -257,7 +273,7 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
 
                             <div class="grid grid-cols-3 gap-3 mb-4 text-center">
                                 <div class="flex flex-col items-center justify-center p-3 rounded-xl bg-[#1a1b20] border border-[#2d2f36]">
-                                    <span class="text-[9px] text-gray-500 uppercase font-bold mb-1">Entry Price</span>
+                                    <span class="text-[9px] text-gray-500 uppercase font-bold mb-1">Average Price</span>
                                     <span class="text-sm font-mono text-white font-bold tracking-wide">{{ formatCurrency(getEntryPrice(trade)) }}</span>
                                 </div>
                                 <div class="flex flex-col items-center justify-center p-3 rounded-xl bg-[#1a1b20] border border-[#2d2f36]">
@@ -402,12 +418,22 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                         </div>
 
                         <div v-if="expandedInfoIds.has(trade.id)" class="bg-[#0a0b0d] p-5 border-t border-[#2d2f36] animate-fade-in-down">
+                            
                             <div class="mb-3">
-                                <h4 class="text-[10px] text-blue-400 uppercase font-bold mb-1">Strategy / Notes</h4>
+                                <h4 class="text-[10px] text-emerald-400 uppercase font-bold mb-1">Total Accumulative Fees</h4>
+                                <div class="text-xs text-white font-mono bg-[#1a1b20] p-2 rounded border border-[#2d2f36] flex justify-between">
+                                    <span class="text-gray-400">Initial + DCA + Sells</span>
+                                    <span class="text-emerald-300 font-bold">{{ formatCurrency(getTotalFeePaid(trade)) }}</span>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <h4 class="text-[10px] text-blue-400 uppercase font-bold mb-1">Entry Notes</h4>
                                 <div class="text-xs text-gray-300 italic leading-relaxed bg-[#1a1b20] p-2 rounded border border-[#2d2f36]">
                                     {{ getNote(trade) || 'No notes available.' }}
                                 </div>
                             </div>
+
                             <div class="flex justify-between items-center mt-2 border-t border-[#2d2f36] pt-2">
                                 <div>
                                     <h4 class="text-[9px] text-gray-500 uppercase font-bold mb-1">Chart Analysis</h4>
