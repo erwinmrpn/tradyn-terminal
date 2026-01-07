@@ -51,8 +51,21 @@ class TradeLogController extends Controller
          * Menambahkan 'transactions' ke dalam with() agar data DCA/Sell parsial 
          * terkirim ke frontend untuk perhitungan Accumulative Fees.
          */
-        $trades = $query->with(['tradingAccount', 'transactions'])->latest($sortField)->get();
-        
+       // --- SORTING DATA ---
+        $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
+
+        /**
+        * [FIX] Eager Loading Kondisional
+        * Kita hanya memanggil relasi 'transactions' jika tipe-nya adalah SPOT.
+        * Karena model FuturesTrade tidak memiliki relasi ini.
+        */
+        $relations = ['tradingAccount'];
+
+        if ($type === 'SPOT') {
+        $relations[] = 'transactions';
+        }
+
+        $trades = $query->with($relations)->latest($sortField)->get();
         $accounts = $user->tradingAccounts;
 
         // --- HITUNG BALANCE TERPISAH ---
