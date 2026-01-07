@@ -121,11 +121,17 @@ const switchTab = (type: string) => {
     router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
 };
 
-// Helper Formatters
+// --- HELPERS / FORMATTERS ---
 const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const formatTimeShort = (timeString: string) => timeString ? timeString.slice(0, 5) : '';
 
-// Helper Warna Holding Period
+// [BARU] Fungsi hitung total accumulative fee untuk history log
+const calculateTotalFee = (trade: any) => {
+    const initialFee = parseFloat(trade.fee || 0);
+    const transactionFees = trade.transactions ? trade.transactions.reduce((sum: number, t: any) => sum + parseFloat(t.fee || 0), 0) : 0;
+    return initialFee + transactionFees;
+};
+
 const getHoldingClass = (period: string) => {
     if (period === 'Short Term') return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
     if (period === 'Medium Term') return 'text-blue-400 border-blue-500/30 bg-blue-500/10';
@@ -215,17 +221,16 @@ const getHoldingClass = (period: string) => {
                             <thead class="bg-[#1a1b20] text-gray-400 uppercase text-[10px] tracking-wider font-semibold">
                                 <tr>
                                     <th class="px-6 py-3">Asset</th>
-                                    <th class="px-6 py-3" v-if="props.activeType === 'FUTURES'">Entry / Exit Time</th>
-                                    <th class="px-6 py-3" v-else>Buy / Sell Time</th>
-
+                                    <th class="px-6 py-3">{{ props.activeType === 'SPOT' ? 'Last Activity' : 'Entry / Exit Time' }}</th>
                                     <th class="px-6 py-3" v-if="props.activeType === 'FUTURES'">Type</th>
                                     
-                                    <th class="px-6 py-3 text-right">Price</th>
+                                    <th class="px-6 py-3 text-right">{{ props.activeType === 'SPOT' ? 'Avg Price' : 'Price' }}</th>
                                     <th class="px-6 py-3 text-right">Size/Qty</th>
                                     
                                     <template v-if="props.activeType === 'SPOT'">
                                         <th class="px-6 py-3 text-center">Holding</th>
-                                        <th class="px-6 py-3 text-right">Targets</th>
+                                        <th class="px-6 py-3 text-right">Total Fee</th>
+                                        <th class="px-6 py-3 text-right">Realized PnL</th>
                                     </template>
                                     <template v-else>
                                         <th class="px-6 py-3 text-right">Margin</th>
@@ -277,11 +282,11 @@ const getHoldingClass = (period: string) => {
                                                 {{ trade.holding_period?.replace(' Term', '') }}
                                             </span>
                                         </td>
-                                        <td class="px-6 py-3 text-right text-xs font-mono">
-                                            <div class="flex flex-col items-end">
-                                                <span class="text-emerald-500" title="Target Sell">{{ trade.target_sell_price ? formatCurrency(trade.target_sell_price) : '-' }}</span>
-                                                <span class="text-blue-500 text-[10px]" title="Target Buy">{{ trade.target_buy_price ? formatCurrency(trade.target_buy_price) : '-' }}</span>
-                                            </div>
+                                        <td class="px-6 py-3 text-right text-xs font-mono text-emerald-500">
+                                            {{ formatCurrency(calculateTotalFee(trade)) }}
+                                        </td>
+                                        <td class="px-6 py-3 text-right text-xs font-mono font-bold" :class="trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'">
+                                            {{ trade.pnl ? formatCurrency(trade.pnl) : '$0.00' }}
                                         </td>
                                     </template>
                                     <template v-else>
@@ -351,7 +356,7 @@ const getHoldingClass = (period: string) => {
                         <div class="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div>
                         <h3 class="text-lg font-bold text-white mb-2">Delete Trade?</h3>
                         <div class="bg-red-500/5 border border-red-500/10 rounded-lg p-4 text-left">
-                            <p class="text-xs text-gray-400 mb-3 leading-relaxed">This action cannot be undone.</p>
+                            <p class="text-xs text-gray-400 leading-relaxed">This action will rollback your account balance. This process cannot be undone.</p>
                         </div>
                     </div>
                     <div class="flex gap-3">
