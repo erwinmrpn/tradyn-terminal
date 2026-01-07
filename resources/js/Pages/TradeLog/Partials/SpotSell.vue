@@ -17,6 +17,8 @@ const isCompressing = ref(false);
 
 const transactionType = ref<'BUY' | 'SELL'>('BUY'); 
 const inputMode = ref<'COIN' | 'USD'>('COIN');
+// State untuk slider persentase sell
+const sellPercentage = ref<number>(0);
 
 const now = ref(new Date());
 let timer: any;
@@ -36,10 +38,9 @@ const parseNumber = (val: any) => {
     return isNaN(num) ? 0 : num;
 };
 
-// Fungsi helper untuk menghitung akumulasi fee per trade (Awal + Semua DCA + Semua Sells)
+// Fungsi helper untuk menghitung akumulasi fee per trade
 const getTotalFeePaid = (trade: any) => {
     const initialFee = parseNumber(trade.fee);
-    // Menghitung total fee dari semua transaksi yang ada di tabel anak
     const transactionFees = trade.transactions ? trade.transactions.reduce((sum: number, t: any) => {
         return sum + parseNumber(t.fee);
     }, 0) : 0;
@@ -53,18 +54,24 @@ const holdingTrades = computed(() => {
         .sort((a, b) => new Date(b.buy_date + 'T' + b.buy_time).getTime() - new Date(a.buy_date + 'T' + a.buy_time).getTime());
 });
 
+const activeTradeData = computed(() => {
+    if (!expandedFormId.value) return null;
+    return holdingTrades.value.find(t => t.id === expandedFormId.value);
+});
+
+const currentHoldingQty = computed(() => {
+    return activeTradeData.value ? parseNumber(getQty(activeTradeData.value)) : 0;
+});
+
 const summaryMetrics = computed(() => {
     const trades = holdingTrades.value;
     const totalAssets = trades.length;
     
-    // [FIX] Total Invested = (Qty * Current Avg Price) + Seluruh Accumulative Fee (Awal + DCA + Sells)
     const totalInvested = trades.reduce((sum, t) => {
         const currentQty = parseNumber(getQty(t));
         const avgPrice = parseNumber(getEntryPrice(t));
         const netCost = currentQty * avgPrice;
-        
         const accumulativeFee = getTotalFeePaid(t);
-        
         return sum + netCost + accumulativeFee;
     }, 0);
     
@@ -93,6 +100,25 @@ const form = useForm({
 });
 
 // --- SMART INPUT LOGIC ---
+// Watcher untuk Slider Persentase Sell (FIX: Konversi ke String untuk hindari TS Error)
+watch(sellPercentage, (newPercent) => {
+    if (transactionType.value === 'SELL' && currentHoldingQty.value > 0) {
+        if (newPercent === 0) {
+            form.quantity = '';
+        } else if (newPercent === 100) {
+            form.quantity = String(currentHoldingQty.value);
+        } else {
+            const calculateQty = (newPercent / 100) * currentHoldingQty.value;
+            form.quantity = calculateQty.toFixed(8);
+        }
+    }
+});
+
+watch([transactionType, expandedFormId], () => {
+    sellPercentage.value = 0;
+});
+
+
 watch(() => [form.price, form.quantity], () => {
     if (inputMode.value === 'COIN') {
         const p = parseNumber(form.price);
@@ -127,12 +153,23 @@ const calculationPreview = computed(() => {
         const totalCostNew = newQty * newPrice;
         const totalQtyFinal = currentQty + newQty;
         const newAverage = (totalCostOld + totalCostNew) / totalQtyFinal;
-        return { label: 'New Avg Entry', value: newAverage, isCurrency: true, colorClass: 'text-emerald-400' };
+        return { 
+            type: 'BUY',
+            label: 'New Avg Entry', 
+            value: newAverage, 
+            colorClass: 'text-emerald-400' 
+        };
     } else {
         const revenue = newPrice * newQty;
         const cost = currentAvg * newQty;
         const pnl = revenue - cost - parseNumber(form.fee); 
-        return { label: 'Est. Realized PnL', value: pnl, isCurrency: true, colorClass: pnl >= 0 ? 'text-emerald-400' : 'text-red-400' };
+        return { 
+            type: 'SELL',
+            label: 'Est. Realized PnL', 
+            pnlValue: pnl, 
+            receivedValue: revenue, 
+            colorClass: pnl >= 0 ? 'text-emerald-400' : 'text-red-400' 
+        };
     }
 });
 
@@ -150,9 +187,9 @@ const toggleManageForm = (trade: any) => {
         form.reset();
         transactionType.value = 'BUY'; 
         form.type = 'BUY';
+        form.price = String(getEntryPrice(trade));
         form.date = new Date().toISOString().split('T')[0];
         form.time = new Date().toTimeString().slice(0, 5);
-        form.price = getEntryPrice(trade); 
     }
 };
 
@@ -161,6 +198,9 @@ const switchMode = (mode: 'BUY' | 'SELL') => {
     form.type = mode;
     form.quantity = '';
     form.total_usd = '';
+    if (mode === 'SELL' && activeTradeData.value) {
+         form.price = String(getEntryPrice(activeTradeData.value));
+    }
 };
 
 const handleFileChange = async (event: Event) => {
@@ -322,7 +362,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                             </div>
 
                             <form @submit.prevent="submitTransaction">
-                                
                                 <div class="grid grid-cols-2 gap-3 mb-3">
                                     <div>
                                         <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">
@@ -376,6 +415,60 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                     </div>
                                 </div>
 
+                                <div v-if="transactionType === 'SELL'" class="mb-4 animate-fade-in-down">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <label class="text-[9px] font-bold text-gray-500 uppercase">Sell Percentage</label>
+                                        <span class="text-xs font-bold text-red-400 font-mono">{{ sellPercentage }}%</span>
+                                    </div>
+                                    <div class="relative">
+                                        <input type="range" v-model.number="sellPercentage" min="0" max="100" step="1"
+                                            class="w-full h-2 bg-[#0a0b0d] rounded-lg appearance-none cursor-pointer range-slider border border-[#2d2f36]"
+                                            :style="`background: linear-gradient(to right, #ef4444 ${sellPercentage}%, #0a0b0d ${sellPercentage}%)`">
+                                        <div class="flex justify-between text-[8px] text-gray-600 font-bold uppercase mt-1 px-1 font-mono">
+                                            <span @click="sellPercentage = 0" class="cursor-pointer hover:text-gray-400">0%</span>
+                                            <span @click="sellPercentage = 25" class="cursor-pointer hover:text-gray-400">25%</span>
+                                            <span @click="sellPercentage = 50" class="cursor-pointer hover:text-gray-400">50%</span>
+                                            <span @click="sellPercentage = 75" class="cursor-pointer hover:text-gray-400">75%</span>
+                                            <span @click="sellPercentage = 100" class="cursor-pointer hover:text-gray-400">100%</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="calculationPreview" class="bg-[#0a0b0d] p-3 rounded border border-[#2d2f36] mb-3 space-y-2">
+                                    <div v-if="calculationPreview.type === 'BUY'" class="flex justify-between items-center">
+                                        <span class="text-[10px] text-gray-500 font-bold uppercase">{{ calculationPreview.label }}</span>
+                                        <span class="text-sm font-black font-mono" :class="calculationPreview.colorClass">
+                                            {{ formatCurrency(calculationPreview.value) }}
+                                        </span>
+                                    </div>
+
+                                    <div v-else class="space-y-2">
+                                        <div class="flex justify-between items-center border-b border-[#1f2128] pb-2">
+                                            <span class="text-[10px] text-gray-500 font-bold uppercase">Total Received (USD)</span>
+                                            <span class="text-sm font-black font-mono text-white">
+                                                {{ formatCurrency(calculationPreview.receivedValue) }}
+                                            </span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-[10px] text-gray-500 font-bold uppercase">Net Profit (After Fee)</span>
+                                            <span class="text-sm font-black font-mono" :class="calculationPreview.colorClass">
+                                                {{ formatCurrency(calculationPreview.pnlValue) }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="flex gap-2 mb-3">
+                                    <input type="text" v-model="form.notes" :placeholder="transactionType === 'BUY' ? 'DCA Reason...' : 'Sell Reason...'" 
+                                        class="flex-1 bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded p-2 outline-none transition-colors"
+                                        :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'">
+                                    
+                                    <label class="flex items-center justify-center w-10 bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer text-gray-400 hover:text-white transition-colors hover:border-gray-500">
+                                        <span class="text-xs">{{ form.screenshot ? '📷' : '+' }}</span>
+                                        <input type="file" @change="handleFileChange" accept="image/*" class="hidden">
+                                    </label>
+                                </div>
+
                                 <div class="grid grid-cols-2 gap-3 mb-3">
                                     <div>
                                         <label class="text-[9px] font-bold text-gray-500 uppercase block mb-1">Date</label>
@@ -391,24 +484,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                     </div>
                                 </div>
 
-                                <div v-if="calculationPreview" class="flex justify-between items-center bg-[#0a0b0d] p-3 rounded border border-[#2d2f36] mb-3">
-                                    <span class="text-[10px] text-gray-500 font-bold uppercase">{{ calculationPreview.label }}</span>
-                                    <span class="text-sm font-black font-mono" :class="calculationPreview.colorClass">
-                                        {{ calculationPreview.isCurrency ? formatCurrency(calculationPreview.value) : calculationPreview.value }}
-                                    </span>
-                                </div>
-
-                                <div class="flex gap-2 mb-3">
-                                    <input type="text" v-model="form.notes" :placeholder="transactionType === 'BUY' ? 'DCA Reason...' : 'Sell Reason...'" 
-                                        class="flex-1 bg-[#0a0b0d] border border-[#2d2f36] text-gray-300 text-xs rounded p-2 outline-none transition-colors"
-                                        :class="transactionType === 'BUY' ? 'focus:border-emerald-500' : 'focus:border-red-500'">
-                                    
-                                    <label class="flex items-center justify-center w-10 bg-[#0a0b0d] border border-[#2d2f36] rounded cursor-pointer text-gray-400 hover:text-white transition-colors hover:border-gray-500">
-                                        <span class="text-xs">{{ form.screenshot ? '📷' : '+' }}</span>
-                                        <input type="file" @change="handleFileChange" accept="image/*" class="hidden">
-                                    </label>
-                                </div>
-
                                 <button type="submit" :disabled="form.processing" 
                                     class="w-full py-2.5 rounded text-white text-xs font-black uppercase tracking-wider transition-colors shadow-lg"
                                     :class="transactionType === 'BUY' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-[0_0_15px_rgba(5,150,105,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'">
@@ -418,7 +493,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                         </div>
 
                         <div v-if="expandedInfoIds.has(trade.id)" class="bg-[#0a0b0d] p-5 border-t border-[#2d2f36] animate-fade-in-down">
-                            
                             <div class="mb-3">
                                 <h4 class="text-[10px] text-emerald-400 uppercase font-bold mb-1">Total Accumulative Fees</h4>
                                 <div class="text-xs text-white font-mono bg-[#1a1b20] p-2 rounded border border-[#2d2f36] flex justify-between">
@@ -465,7 +539,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                             </svg>
                         </button>
-
                     </div>
                 </div>
             </div>
@@ -474,7 +547,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                 <svg class="w-10 h-10 mb-3 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 12H4" /></svg>
                 <span class="text-xs font-bold uppercase tracking-widest">No Active Spot Holdings Found.</span>
             </div>
-
         </div>
     </div>
 </template>
@@ -488,6 +560,29 @@ input[type=number]::-webkit-outer-spin-button {
 }
 input[type=number] {
   -moz-appearance: textfield;
+}
+
+/* Styling untuk Range Slider */
+.range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #ef4444;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #0a0b0d;
+    box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
+}
+
+.range-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #ef4444;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #0a0b0d;
+    box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
 }
 
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
