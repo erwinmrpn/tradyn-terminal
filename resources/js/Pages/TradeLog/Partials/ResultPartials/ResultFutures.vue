@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
+// --- PROPS ---
 const props = defineProps<{
     trades: any[];
 }>();
 
-const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK'); // Default WEEK agar sesuai screenshot
+// --- STATE ---
+const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK');
 const expandedCards = ref<Set<number>>(new Set());
 
-// --- HELPERS ---
+// --- HELPERS: DATE ---
+const getStartOfDay = (date: Date) => { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; };
+const getStartOfWeek = (date: Date) => { const d = new Date(date); const day = d.getDay() || 7; if (day !== 1) d.setHours(-24 * (day - 1)); d.setHours(0, 0, 0, 0); return d; };
+const getStartOfMonth = (date: Date) => { const d = new Date(date); d.setDate(1); d.setHours(0, 0, 0, 0); return d; };
+
+// --- HELPERS: UI ---
 const toggleExpand = (id: number) => {
-    if (expandedCards.value.has(id)) {
-        expandedCards.value.delete(id);
-    } else {
-        expandedCards.value.add(id);
-    }
+    if (expandedCards.value.has(id)) expandedCards.value.delete(id);
+    else expandedCards.value.add(id);
 };
 
 const getDateTime = (dateStr: string, timeStr: string) => {
@@ -22,66 +26,49 @@ const getDateTime = (dateStr: string, timeStr: string) => {
     return new Date(`${dateStr}T${timeStr}`);
 };
 
-// [FIX] Helper Date Comparison
-const isSameDay = (d1: Date, d2: Date) => {
-    return d1.getFullYear() === d2.getFullYear() && 
-           d1.getMonth() === d2.getMonth() && 
-           d1.getDate() === d2.getDate();
-};
-
-const isSameMonth = (d1: Date, d2: Date) => {
-    return d1.getFullYear() === d2.getFullYear() && 
-           d1.getMonth() === d2.getMonth();
-};
-
-// [LOGIC] Logika Minggu (Senin - Minggu)
-const isSameWeek = (date1: Date, date2: Date) => {
-    const d1 = new Date(date1);
-    const d2 = new Date(date2);
-    
-    d1.setHours(0, 0, 0, 0);
-    d2.setHours(0, 0, 0, 0);
-
-    const day1 = d1.getDay() || 7; 
-    const day2 = d2.getDay() || 7;
-
-    d1.setDate(d1.getDate() - day1 + 1);
-    d2.setDate(d2.getDate() - day2 + 1);
-
-    return d1.getTime() === d2.getTime();
-};
-
-// --- FILTER & SORT ---
-const filteredTrades = computed(() => {
+// --- LOGIC: FILTER TRADES ---
+const filterTradesByPeriod = (allTrades: any[], period: string, offset: number = 0) => {
     const now = new Date();
-    
-    return props.trades
-        .filter(t => {
-            if (!t.exit_date) return false;
-            const tradeDate = new Date(t.exit_date + 'T00:00:00');
-            
-            if (timeFrame.value === 'TODAY') {
-                return isSameDay(tradeDate, now);
-            } 
-            else if (timeFrame.value === 'WEEK') {
-                return isSameWeek(tradeDate, now);
-            } 
-            else if (timeFrame.value === 'MONTH') {
-                return isSameMonth(tradeDate, now);
-            }
-            return false;
-        })
-        .sort((a, b) => {
-            const timeA = new Date(a.exit_date + 'T' + (a.exit_time || '00:00')).getTime();
-            const timeB = new Date(b.exit_date + 'T' + (b.exit_time || '00:00')).getTime();
-            return timeB - timeA;
-        });
-});
+    let startDate: Date, endDate: Date;
 
-// --- METRICS ---
-const metrics = computed(() => {
-    const trades = filteredTrades.value;
+    if (period === 'TODAY') {
+        startDate = getStartOfDay(now);
+        startDate.setDate(startDate.getDate() - offset);
+        endDate = new Date(startDate);
+        endDate.setHours(23, 59, 59, 999);
+    } 
+    else if (period === 'WEEK') {
+        startDate = getStartOfWeek(now);
+        startDate.setDate(startDate.getDate() - (offset * 7));
+        endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+    } 
+    else { // MONTH
+        startDate = getStartOfMonth(now);
+        startDate.setMonth(startDate.getMonth() - offset);
+        endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + 1);
+        endDate.setDate(0); 
+        endDate.setHours(23, 59, 59, 999);
+    }
+
+    return allTrades.filter(t => {
+        if (!t.exit_date) return false;
+        const tradeDate = new Date(t.exit_date + 'T' + (t.exit_time || '00:00'));
+        return tradeDate >= startDate && tradeDate <= endDate;
+    }).sort((a, b) => {
+        const timeA = new Date(a.exit_date + 'T' + (a.exit_time || '00:00')).getTime();
+        const timeB = new Date(b.exit_date + 'T' + (b.exit_time || '00:00')).getTime();
+        return timeB - timeA;
+    });
+};
+
+// --- LOGIC: CALCULATE METRICS ---
+const calculateMetrics = (trades: any[]) => {
     let netPnL = 0;
+    let totalInvested = 0; 
+    let totalFee = 0;
     let wins = 0;
     let totalRR = 0;
     let rrCount = 0;
@@ -91,7 +78,15 @@ const metrics = computed(() => {
         const pnl = parseFloat(t.pnl || 0);
         netPnL += pnl;
         if (pnl > 0) wins++;
-        
+
+        const fee = parseFloat(t.fee || 0);
+        totalFee += fee;
+
+        // Margin digunakan sebagai cost basis di Futures
+        const margin = parseFloat(t.margin || 0);
+        totalInvested += margin;
+
+        // R:R Calculation
         if (t.sl_price && parseFloat(t.sl_price) > 0) {
             const risk = Math.abs(parseFloat(t.entry_price) - parseFloat(t.sl_price)) * parseFloat(t.quantity);
             if (risk > 0) {
@@ -100,6 +95,7 @@ const metrics = computed(() => {
             }
         }
 
+        // Duration
         const start = getDateTime(t.entry_date, t.entry_time);
         const end = getDateTime(t.exit_date, t.exit_time);
         if (start && end) {
@@ -107,38 +103,46 @@ const metrics = computed(() => {
         }
     });
 
-    const totalTrades = trades.length;
+    const count = trades.length;
+    
+    // ROI (Return on Margin)
+    let roi = 0;
+    if (count > 0 && totalInvested > 0) {
+        roi = (netPnL / totalInvested) * 100;
+    }
+
     return {
         netPnL,
-        totalTrades,
-        winRate: totalTrades > 0 ? (wins / totalTrades) * 100 : 0,
-        avgRR: rrCount > 0 ? (totalRR / rrCount) : 0,
-        avgDurationMs: totalTrades > 0 ? (totalDurationMs / totalTrades) : 0
+        roi,
+        totalTrades: count,
+        winRate: count > 0 ? (wins / count) * 100 : 0,
+        avgDuration: count > 0 ? totalDurationMs / count : 0,
+        totalFee,
+        avgRR: rrCount > 0 ? (totalRR / rrCount) : 0
     };
-});
+};
+
+const currentTrades = computed(() => filterTradesByPeriod(props.trades, timeFrame.value, 0));
+const previousTrades = computed(() => filterTradesByPeriod(props.trades, timeFrame.value, 1));
+const currentMetrics = computed(() => calculateMetrics(currentTrades.value));
+const previousMetrics = computed(() => calculateMetrics(previousTrades.value));
 
 // --- FORMATTERS ---
 const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-
 const formatDurationSmart = (ms: number) => {
     if (!ms || ms <= 0) return '-';
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    if (days > 30) return Math.floor(days/30) + ' Mo';
+    if (days > 0) return days + ' d';
     const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
-    let result = '';
-    if (days > 0) result += `${days}d `;
-    if (hours > 0) result += `${hours}h `;
-    result += `${minutes}m`;
-    return result;
+    return hours + ' h';
 };
-
 const getTradeDuration = (trade: any) => {
     const start = getDateTime(trade.entry_date, trade.entry_time);
     const end = getDateTime(trade.exit_date, trade.exit_time);
     if (!start || !end) return '-';
     return formatDurationSmart(end.getTime() - start.getTime());
 };
-
 const getRR = (trade: any) => {
     if (!trade.sl_price || !trade.entry_price || !trade.pnl) return '-';
     const risk = Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.sl_price)) * parseFloat(trade.quantity);
@@ -146,79 +150,127 @@ const getRR = (trade: any) => {
     const r = parseFloat(trade.pnl) / risk;
     return `1 : ${r.toFixed(1)}`;
 };
-
-// Styling Logics
-const pnlClass = computed(() => metrics.value.netPnL > 0 ? 'text-green-500' : (metrics.value.netPnL < 0 ? 'text-red-500' : 'text-gray-400'));
-const winRateClass = computed(() => metrics.value.winRate >= 60 ? 'text-green-500' : (metrics.value.winRate >= 50 ? 'text-yellow-500' : 'text-red-500'));
-const tradesClass = computed(() => timeFrame.value === 'TODAY' && metrics.value.totalTrades > 5 ? 'text-red-500' : 'text-white');
-const rrClass = computed(() => metrics.value.avgRR >= 1.5 ? 'text-green-500' : (metrics.value.avgRR >= 1 ? 'text-yellow-500' : 'text-red-500'));
+const getComparisonLabel = () => {
+    if (timeFrame.value === 'TODAY') return 'vs Yest.';
+    if (timeFrame.value === 'WEEK') return 'vs Last Wk.';
+    return 'vs Last Mo.';
+};
 </script>
 
 <template>
-    <div class="space-y-8">
+    <div class="space-y-8 animate-fade-in-down">
         
-       <div class="flex justify-between items-center">
-    <h3 class="text-sm font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-        </svg>
-        Futures Performance
-    </h3>
-    
-    <div class="relative group">
-        <select 
-            v-model="timeFrame" 
-            class="appearance-none cursor-pointer pl-4 pr-10 py-2 rounded-lg text-xs font-bold text-white 
-                   bg-[#1a1b20] border border-[#2d2f36] 
-                   focus:outline-none focus:border-[#8c52ff] focus:ring-1 focus:ring-[#8c52ff] 
-                   transition-all hover:border-[#5ce1e6]"
-        >
-            <option value="TODAY" class="bg-[#1a1b20] text-white py-2">Today</option>
-            <option value="WEEK" class="bg-[#1a1b20] text-white py-2">This Week</option>
-            <option value="MONTH" class="bg-[#1a1b20] text-white py-2">This Month</option>
-        </select>
-        
-        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 group-hover:text-white transition-colors">
-            <svg class="h-3 w-3 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
-            </svg>
-        </div>
-    </div>
-</div>
-
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div class="summary-card-gradient">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Net PnL</div>
-                <div class="text-2xl font-black" :class="pnlClass">{{ metrics.netPnL > 0 ? '+' : '' }}{{ formatCurrency(metrics.netPnL) }}</div>
-            </div>
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <span class="p-1.5 rounded bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] text-black">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                </span>
+                Futures Result Performance
+            </h3>
             
-            <div class="summary-card-gradient">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Win Rate</div>
-                <div class="text-xl font-bold" :class="winRateClass">{{ metrics.winRate.toFixed(0) }}%</div>
-            </div>
-            
-            <div class="summary-card-gradient">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Trades</div>
-                <div class="text-xl font-bold" :class="tradesClass">
-                    {{ metrics.totalTrades }} 
-                    <span class="text-[10px] font-normal text-gray-500 ml-1">{{ timeFrame === 'WEEK' ? 'week' : timeFrame.toLowerCase() }}</span>
+            <div class="p-[1px] rounded-lg bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6]">
+                <div class="flex bg-[#1a1b20] p-1 rounded-lg h-full">
+                    <button @click="timeFrame = 'TODAY'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'TODAY' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Today</button>
+                    <button @click="timeFrame = 'WEEK'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'WEEK' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Week</button>
+                    <button @click="timeFrame = 'MONTH'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'MONTH' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Month</button>
                 </div>
             </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-stretch">
             
-            <div class="summary-card-gradient">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Avg R:R</div>
-                <div class="text-xl font-bold" :class="rrClass">1 : {{ Math.abs(metrics.avgRR).toFixed(1) }}</div>
+            <div class="col-span-1 relative group p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full relative overflow-hidden flex flex-col justify-between text-left">
+                    <div class="flex justify-between items-start">
+                        <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Net PnL</div>
+                        <div class="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                            <svg class="w-12 h-12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+                        </div>
+                    </div>
+                    <div class="flex-1 flex items-center">
+                        <h2 class="text-xl font-black tracking-tight" :class="currentMetrics.netPnL >= 0 ? 'text-green-400' : 'text-red-500'">
+                            {{ currentMetrics.netPnL >= 0 ? '+' : '' }}{{ formatCurrency(currentMetrics.netPnL) }}
+                        </h2>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-1">
+                        <span class="text-[9px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-[#1a1b20] border border-[#2d2f36]"
+                            :class="currentMetrics.netPnL >= previousMetrics.netPnL ? 'text-green-400' : 'text-red-400'">
+                            <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" :d="currentMetrics.netPnL >= previousMetrics.netPnL ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'" />
+                            </svg>
+                            {{ previousMetrics.netPnL === 0 ? '100%' : Math.abs(((currentMetrics.netPnL - previousMetrics.netPnL) / (Math.abs(previousMetrics.netPnL) || 1)) * 100).toFixed(0) + '%' }}
+                        </span>
+                        <span class="text-[9px] text-gray-500 font-medium whitespace-nowrap">{{ getComparisonLabel() }}</span>
+                    </div>
+                </div>
             </div>
-            
-            <div class="summary-card-gradient">
-                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2">Avg Duration</div>
-                <div class="text-xl font-bold text-white">{{ formatDurationSmart(metrics.avgDurationMs) }}</div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left relative overflow-hidden">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Avg R:R</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-xl font-black" :class="currentMetrics.avgRR >= 1.5 ? 'text-green-400' : (currentMetrics.avgRR >= 1 ? 'text-yellow-500' : 'text-red-500')">
+                            1 : {{ Math.abs(currentMetrics.avgRR).toFixed(1) }}
+                        </div>
+                    </div>
+                    <div class="text-[9px] font-medium text-gray-500 flex items-center gap-1">
+                        Risk Reward
+                    </div>
+                </div>
             </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Trades</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-2xl font-black text-white">{{ currentMetrics.totalTrades }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">Closed Positions</div>
+                </div>
+            </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Win Rate</div>
+                    <div class="flex-1 flex flex-col justify-center gap-2">
+                        <div class="text-xl font-black" :class="currentMetrics.winRate >= 50 ? 'text-blue-400' : 'text-yellow-500'">
+                            {{ currentMetrics.winRate.toFixed(0) }}%
+                        </div>
+                        <div class="w-full bg-[#1f2128] h-1 rounded-full overflow-hidden">
+                            <div class="h-full bg-blue-500 transition-all duration-500" :style="{ width: currentMetrics.winRate + '%' }"></div>
+                        </div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium opacity-0">.</div>
+                </div>
+            </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Avg Duration</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-lg font-black text-purple-400">{{ formatDurationSmart(currentMetrics.avgDuration) }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">Hold Time</div>
+                </div>
+            </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Total Fees</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-lg font-black text-white font-mono">{{ formatCurrency(currentMetrics.totalFee) }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">All Trades</div>
+                </div>
+            </div>
+
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             
-            <div v-for="trade in filteredTrades" :key="trade.id" class="relative group">
+            <div v-for="trade in currentTrades" :key="trade.id" class="relative group">
                 
                 <div class="p-[2px] rounded-2xl bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.1)] hover:shadow-[0_0_25px_rgba(92,225,230,0.3)] transition-all duration-300">
                     
@@ -333,37 +385,16 @@ const rrClass = computed(() => metrics.value.avgRR >= 1.5 ? 'text-green-500' : (
                 </div>
             </div>
 
+            <div v-if="currentTrades.length === 0" class="col-span-full py-12 text-center border border-dashed border-[#2d2f36] rounded-xl text-gray-500">
+                <p class="text-xs font-bold uppercase">No closed trades found for this period.</p>
+            </div>
+
         </div>
 
     </div>
 </template>
 
 <style scoped>
-/* --- ANIMASI --- */
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-in-down { animation: fadeInDown 0.3s ease-out forwards; }
-
-/* --- STYLE BARU: SUMMARY CARDS DENGAN GRADIENT BORDER --- */
-.summary-card-gradient {
-  position: relative;
-  padding: 1.5rem 1rem; /* p-4 equivalent */
-  border-radius: 0.75rem; /* rounded-xl */
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-  
-  /* Logika Gradient Border */
-  border: 2px solid transparent;
-  
-  /* Layer 1: Background Dalam (Gunakan warna gelap senada background utama) */
-  /* Layer 2: Gradient Warna #8c52ff -> #5ce1e6 */
-  background-image: 
-      linear-gradient(#151515, #151515), 
-      linear-gradient(90deg, #8c52ff, #5ce1e6);
-  
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
-}
 </style>
