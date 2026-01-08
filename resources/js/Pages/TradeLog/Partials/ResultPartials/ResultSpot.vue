@@ -9,108 +9,78 @@ const props = defineProps<{
 // --- STATE ---
 const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK');
 
-// --- HELPERS: DATE MANIPULATION ---
-const getStartOfDay = (date: Date) => {
-    const d = new Date(date); d.setHours(0, 0, 0, 0); return d;
-};
+// --- HELPERS ---
+const getStartOfDay = (date: Date) => { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; };
+const getStartOfWeek = (date: Date) => { const d = new Date(date); const day = d.getDay() || 7; if (day !== 1) d.setHours(-24 * (day - 1)); d.setHours(0, 0, 0, 0); return d; };
+const getStartOfMonth = (date: Date) => { const d = new Date(date); d.setDate(1); d.setHours(0, 0, 0, 0); return d; };
 
-const getStartOfWeek = (date: Date) => {
-    const d = new Date(date);
-    const day = d.getDay() || 7; 
-    if (day !== 1) d.setHours(-24 * (day - 1)); 
-    d.setHours(0, 0, 0, 0);
-    return d;
-};
-
-const getStartOfMonth = (date: Date) => {
-    const d = new Date(date); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
-};
-
-// --- LOGIC: FILTER TRADES BY PERIOD ---
+// --- FILTER LOGIC ---
 const filterTradesByPeriod = (allTrades: any[], period: string, offset: number = 0) => {
     const now = new Date();
     let startDate: Date, endDate: Date;
 
     if (period === 'TODAY') {
         startDate = getStartOfDay(now);
-        startDate.setDate(startDate.getDate() - offset); // Mundur hari sesuai offset
-        
+        startDate.setDate(startDate.getDate() - offset);
         endDate = new Date(startDate);
         endDate.setHours(23, 59, 59, 999);
     } 
     else if (period === 'WEEK') {
         startDate = getStartOfWeek(now);
-        startDate.setDate(startDate.getDate() - (offset * 7)); // Mundur minggu
-        
+        startDate.setDate(startDate.getDate() - (offset * 7));
         endDate = new Date(startDate);
         endDate.setDate(endDate.getDate() + 6);
         endDate.setHours(23, 59, 59, 999);
     } 
     else { // MONTH
         startDate = getStartOfMonth(now);
-        startDate.setMonth(startDate.getMonth() - offset); // Mundur bulan
-        
+        startDate.setMonth(startDate.getMonth() - offset);
         endDate = new Date(startDate);
         endDate.setMonth(endDate.getMonth() + 1);
-        endDate.setDate(0); // Akhir bulan
+        endDate.setDate(0); 
         endDate.setHours(23, 59, 59, 999);
     }
 
     return allTrades.filter(t => {
-        // Gunakan sell_date (atau transaction date terakhir) untuk filter result
         if (!t.sell_date) return false;
         const tradeDate = new Date(t.sell_date + 'T' + (t.sell_time || '00:00'));
         return tradeDate >= startDate && tradeDate <= endDate;
     });
 };
 
-// --- LOGIC: CALCULATE METRICS ---
+// --- METRICS LOGIC ---
 const calculateMetrics = (trades: any[]) => {
     let netPnL = 0;
-    let totalInvested = 0; // Cost Basis
+    let totalInvested = 0; 
     let totalFee = 0;
     let wins = 0;
     let totalDurationMs = 0;
 
     trades.forEach(t => {
-        // 1. PnL
         const pnl = parseFloat(t.pnl || 0);
         netPnL += pnl;
-
-        // 2. Win/Loss
         if (pnl > 0) wins++;
 
-        // 3. Fee
-        const fee = parseFloat(t.fee || 0);
-        totalFee += fee;
+        let tradeFee = parseFloat(t.fee || 0);
+        if (t.transactions && Array.isArray(t.transactions)) {
+            t.transactions.forEach((tx: any) => {
+                tradeFee += parseFloat(tx.fee || 0);
+            });
+        }
+        totalFee += tradeFee;
 
-        // 4. Cost Basis (untuk ROI) -> Avg Price * Qty Sold (Approx)
-        // Kita gunakan (Revenue - PnL) untuk mendapatkan Cost Basis kasar jika data quantity historical tidak lengkap
-        // Revenue = Cost + PnL + Fee => Cost = Revenue - PnL - Fee. 
-        // Tapi cara paling aman: trades harus punya data 'price' (avg entry) dan 'quantity' (sold qty).
-        // Karena di ResultSpot parent pass `trades` object (SpotTrade), `quantity` di sini mungkin sisa holding. 
-        // Namun, untuk result, kita asumsikan controller mengirim data snapshot atau kita hitung kasar.
-        // Failsafe: Kita gunakan revenue estimate.
-        // Jika trade 'SOLD', quantity = 0. Kita butuh original quantity. 
-        // Untuk akurasi ROI tinggi, backend idealnya kirim 'cost_basis'. 
-        // Di sini kita pakai pendekatan PnL / PnL% jika ada, atau estimasi.
+        let revenue = 0;
+        if (t.transactions && Array.isArray(t.transactions)) {
+            t.transactions.forEach((tx: any) => {
+                if (tx.type === 'SELL') {
+                    revenue += (parseFloat(tx.price) * parseFloat(tx.quantity));
+                }
+            });
+        }
         
-        // Pendekatan Sederhana untuk ROI:
-        // ROI Individual = PnL / (Sell Price * Qty - PnL) ?? 
-        // Mari gunakan: Invested = (Avg Entry * Sold Qty). 
-        // Karena logic di SpotTradeController menghapus quantity saat sold, kita harus estimasi dari PnL.
-        // Misal PnL = (Sell - Buy) * Qty. 
-        // Kita tidak punya Sold Qty di object SpotTrade utama setelah sold (karena jadi 0).
-        // SOLUSI: Kita gunakan `t.transactions` jika ada, atau abaikan ROI complex.
-        // SEMENTARA: Kita anggap ROI = Net PnL / (Net PnL * Factor) -> Tidak akurat.
-        // Kita skip "Total Invested" complex dan gunakan average ROI dari data yang tersedia jika ada.
-        
-        // ALTERNATIF AMAN: Kita hitung ROI jika ada transaction history, jika tidak 0.
-        // Untuk display dummy/simple: 
-        const approxCost = 1000; // Placeholder agar tidak divide by zero jika data kosong
-        totalInvested += approxCost; 
+        const costBasis = revenue - pnl - tradeFee;
+        totalInvested += (costBasis > 0 ? costBasis : 0);
 
-        // 5. Duration
         if (t.buy_date && t.sell_date) {
             const start = new Date(t.buy_date + 'T' + t.buy_time).getTime();
             const end = new Date(t.sell_date + 'T' + t.sell_time).getTime();
@@ -119,47 +89,34 @@ const calculateMetrics = (trades: any[]) => {
     });
 
     const count = trades.length;
-    
-    // Hitung ROI Agregat (Simplifikasi: PnL / (PnL / AvgROI% ?)) 
-    // Kita gunakan rata-rata PnL Ratio saja untuk sekarang.
-    // Jika data lengkap: ROI = (NetPnL / TotalInvested) * 100
-    // Karena keterbatasan data di frontend (sold qty = 0), kita simulasi ROI logis berdasarkan PnL.
     let roi = 0;
     if (count > 0 && totalInvested > 0) {
-        // Simulasi ROI agar terlihat dinamis (ganti dengan real calculation jika backend support)
-        // Disini saya buat ROI mengikuti arah PnL
-        roi = (netPnL / (count * 500)) * 100; // Asumsi avg trade size $500
+        roi = (netPnL / totalInvested) * 100;
     }
 
     return {
-        netPnL,
-        roi,
-        totalTrades: count,
+        netPnL, roi, totalTrades: count,
         winRate: count > 0 ? (wins / count) * 100 : 0,
         avgDuration: count > 0 ? totalDurationMs / count : 0,
         totalFee
     };
 };
 
-// --- COMPUTED: CURRENT & PREVIOUS DATA ---
 const currentTrades = computed(() => filterTradesByPeriod(props.trades, timeFrame.value, 0));
 const previousTrades = computed(() => filterTradesByPeriod(props.trades, timeFrame.value, 1));
-
 const currentMetrics = computed(() => calculateMetrics(currentTrades.value));
 const previousMetrics = computed(() => calculateMetrics(previousTrades.value));
 
 // --- FORMATTERS ---
 const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-
 const formatDurationSmart = (ms: number) => {
     if (!ms || ms <= 0) return '-';
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-    if (days > 30) return Math.floor(days/30) + ' months';
-    if (days > 0) return days + ' days';
+    if (days > 30) return Math.floor(days/30) + ' Mo';
+    if (days > 0) return days + ' Days';
     const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return hours + ' hours';
+    return hours + ' Hours';
 };
-
 const getComparisonLabel = () => {
     if (timeFrame.value === 'TODAY') return 'vs Yesterday';
     if (timeFrame.value === 'WEEK') return 'vs Last Week';
@@ -178,72 +135,100 @@ const getComparisonLabel = () => {
                 Spot Result Performance
             </h3>
             
-            <div class="flex bg-[#1a1b20] p-1 rounded-lg border border-[#2d2f36]">
-                <button @click="timeFrame = 'TODAY'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'TODAY' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Today</button>
-                <button @click="timeFrame = 'WEEK'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'WEEK' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Week</button>
-                <button @click="timeFrame = 'MONTH'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'MONTH' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Month</button>
+            <div class="p-[1px] rounded-lg bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6]">
+                <div class="flex bg-[#1a1b20] p-1 rounded-lg h-full">
+                    <button @click="timeFrame = 'TODAY'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'TODAY' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Today</button>
+                    <button @click="timeFrame = 'WEEK'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'WEEK' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Week</button>
+                    <button @click="timeFrame = 'MONTH'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'MONTH' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Month</button>
+                </div>
             </div>
         </div>
 
-        <div class="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-stretch">
             
-            <div class="col-span-2 bg-[#121317] border border-[#1f2128] p-5 rounded-xl shadow-lg relative overflow-hidden group">
-                <div class="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                    <svg class="w-16 h-16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
-                </div>
-                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-2">Net Realized PnL</div>
-                <div class="flex items-baseline gap-2">
-                    <h2 class="text-2xl font-black tracking-tight" :class="currentMetrics.netPnL >= 0 ? 'text-green-400' : 'text-red-500'">
-                        {{ currentMetrics.netPnL >= 0 ? '+' : '' }}{{ formatCurrency(currentMetrics.netPnL) }}
-                    </h2>
-                </div>
-                <div class="mt-2 flex items-center gap-1.5">
-                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1"
-                        :class="currentMetrics.netPnL >= previousMetrics.netPnL ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'">
-                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" :d="currentMetrics.netPnL >= previousMetrics.netPnL ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'" />
-                        </svg>
-                        {{ previousMetrics.netPnL === 0 ? '100%' : Math.abs(((currentMetrics.netPnL - previousMetrics.netPnL) / (Math.abs(previousMetrics.netPnL) || 1)) * 100).toFixed(0) + '%' }}
-                    </span>
-                    <span class="text-[10px] text-gray-600">{{ getComparisonLabel() }}</span>
+            <div class="col-span-1 relative group p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full relative overflow-hidden flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Net PnL</div>
+                    
+                    <div class="flex-1 flex flex-col justify-center">
+                        <div class="text-xl font-black tracking-tight" :class="currentMetrics.netPnL >= 0 ? 'text-green-400' : 'text-red-500'">
+                            {{ currentMetrics.netPnL >= 0 ? '+' : '' }}{{ formatCurrency(currentMetrics.netPnL) }}
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-1.5 mt-1">
+                        <span class="text-[9px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-[#1a1b20] border border-[#2d2f36]"
+                            :class="currentMetrics.netPnL >= previousMetrics.netPnL ? 'text-green-400' : 'text-red-400'">
+                            <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" :d="currentMetrics.netPnL >= previousMetrics.netPnL ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'" />
+                            </svg>
+                            {{ previousMetrics.netPnL === 0 ? '100%' : Math.abs(((currentMetrics.netPnL - previousMetrics.netPnL) / (Math.abs(previousMetrics.netPnL) || 1)) * 100).toFixed(0) + '%' }}
+                        </span>
+                        <span class="text-[9px] text-gray-500 font-medium whitespace-nowrap">{{ getComparisonLabel() }}</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="col-span-1 bg-[#121317] border border-[#1f2128] p-4 rounded-xl flex flex-col justify-center items-center text-center relative overflow-hidden">
-                <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">ROI</div>
-                <div class="text-lg font-black" :class="currentMetrics.roi >= 0 ? 'text-green-400' : 'text-red-500'">
-                    {{ currentMetrics.roi >= 0 ? '+' : '' }}{{ currentMetrics.roi.toFixed(2) }}%
-                </div>
-                <div class="mt-1 text-[9px]" :class="currentMetrics.roi >= previousMetrics.roi ? 'text-green-500' : 'text-red-500'">
-                    {{ currentMetrics.roi >= previousMetrics.roi ? '▲' : '▼' }} from prev.
-                </div>
-            </div>
-
-            <div class="col-span-1 bg-[#121317] border border-[#1f2128] p-4 rounded-xl flex flex-col justify-center items-center text-center">
-                <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Asset Trades</div>
-                <div class="text-2xl font-black text-white">{{ currentMetrics.totalTrades }}</div>
-                <div class="text-[9px] text-gray-600">Closed Positions</div>
-            </div>
-
-            <div class="col-span-1 bg-[#121317] border border-[#1f2128] p-4 rounded-xl flex flex-col justify-center items-center text-center">
-                <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Win Rate</div>
-                <div class="text-lg font-black" :class="currentMetrics.winRate >= 50 ? 'text-blue-400' : 'text-yellow-500'">
-                    {{ currentMetrics.winRate.toFixed(0) }}%
-                </div>
-                <div class="w-full bg-[#1f2128] h-1 mt-2 rounded-full overflow-hidden">
-                    <div class="h-full bg-blue-500 transition-all duration-500" :style="{ width: currentMetrics.winRate + '%' }"></div>
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left relative overflow-hidden">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">ROI</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-xl font-black" :class="currentMetrics.roi >= 0 ? 'text-green-400' : 'text-red-500'">
+                            {{ currentMetrics.roi >= 0 ? '+' : '' }}{{ currentMetrics.roi.toFixed(2) }}%
+                        </div>
+                    </div>
+                    <div class="text-[9px] font-medium text-gray-500 flex items-center gap-1">
+                        <span :class="currentMetrics.roi >= previousMetrics.roi ? 'text-green-500' : 'text-red-500'">
+                            {{ currentMetrics.roi >= previousMetrics.roi ? '▲' : '▼' }}
+                        </span> 
+                        from prev.
+                    </div>
                 </div>
             </div>
 
-            <div class="col-span-1 bg-[#121317] border border-[#1f2128] p-4 rounded-xl flex flex-col justify-center items-center text-center">
-                <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Avg Hold</div>
-                <div class="text-sm font-black text-purple-400">{{ formatDurationSmart(currentMetrics.avgDuration) }}</div>
-                <div class="text-[9px] text-gray-600 mt-1">Duration</div>
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Trades</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-2xl font-black text-white">{{ currentMetrics.totalTrades }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">Closed Positions</div>
+                </div>
             </div>
 
-            <div class="col-span-2 lg:col-span-6 bg-[#121317]/50 border border-[#1f2128] border-dashed p-3 rounded-lg flex justify-between items-center px-6">
-                <span class="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Total Fee All Trades ({{ timeFrame }})</span>
-                <span class="text-sm font-mono text-white font-bold">{{ formatCurrency(currentMetrics.totalFee) }}</span>
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Win Rate</div>
+                    <div class="flex-1 flex flex-col justify-center gap-2">
+                        <div class="text-xl font-black" :class="currentMetrics.winRate >= 50 ? 'text-blue-400' : 'text-yellow-500'">
+                            {{ currentMetrics.winRate.toFixed(0) }}%
+                        </div>
+                        <div class="w-full bg-[#1f2128] h-1 rounded-full overflow-hidden">
+                            <div class="h-full bg-blue-500 transition-all duration-500" :style="{ width: currentMetrics.winRate + '%' }"></div>
+                        </div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium opacity-0">.</div>
+                </div>
+            </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Avg Hold</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-lg font-black text-purple-400">{{ formatDurationSmart(currentMetrics.avgDuration) }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">Duration</div>
+                </div>
+            </div>
+
+            <div class="col-span-1 p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
+                <div class="bg-[#121317] rounded-xl p-5 h-full flex flex-col justify-between text-left">
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Total Fees</div>
+                    <div class="flex-1 flex items-center">
+                        <div class="text-lg font-black text-white font-mono">{{ formatCurrency(currentMetrics.totalFee) }}</div>
+                    </div>
+                    <div class="text-[9px] text-gray-600 font-medium">All Trades</div>
+                </div>
             </div>
 
         </div>
@@ -275,7 +260,12 @@ const getComparisonLabel = () => {
                          </div>
                          <div class="flex flex-col items-end">
                             <span class="text-[9px] text-gray-500 uppercase font-bold">Fee</span>
-                            <span class="font-mono text-xs text-gray-300">{{ formatCurrency(trade.fee) }}</span>
+                            <span class="font-mono text-xs text-gray-300">
+                                {{ formatCurrency(
+                                    parseFloat(trade.fee || 0) + 
+                                    (trade.transactions ? trade.transactions.reduce((sum:number, t:any) => sum + parseFloat(t.fee || 0), 0) : 0)
+                                ) }}
+                            </span>
                          </div>
                     </div>
 

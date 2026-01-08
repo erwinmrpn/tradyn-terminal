@@ -20,59 +20,66 @@ class TradeLogController extends Controller
     public function index(Request $request)
     {
         $type = $request->input('type', 'SPOT'); 
+        $resultType = $request->input('result_type', 'FUTURES'); // Parameter kunci
         $accountId = $request->input('account_id', 'all');
         $user = Auth::user();
 
-        // --- QUERY DATA TRADES ---
+        // 1. TENTUKAN DATA TRADES
         if ($type === 'FUTURES') {
             $query = FuturesTrade::query();
+            $relations = ['tradingAccount'];
         } elseif ($type === 'RESULT') {
-            // Tab RESULT: Hanya menampilkan trade yang sudah selesai (CLOSED)
-            $query = FuturesTrade::query()->where('status', 'CLOSED');
+            
+            // LOGIKA RESULT SPOT vs FUTURES
+            if ($resultType === 'SPOT') {
+                // Ambil Spot yang statusnya SOLD
+                $query = SpotTrade::query()->where('status', 'SOLD');
+                // Transactions penting untuk hitung history fee/price history
+                $relations = ['tradingAccount', 'transactions']; 
+            } else {
+                // Ambil Futures yang statusnya CLOSED
+                $query = FuturesTrade::query()->where('status', 'CLOSED');
+                $relations = ['tradingAccount'];
+            }
+
         } else {
-            // Tab SPOT: Tampilkan semua history spot
+            // Tab SPOT (Active Holdings)
             $query = SpotTrade::query();
+            $relations = ['tradingAccount', 'transactions'];
         }
 
-        // --- FILTER BERDASARKAN AKUN ---
+        // 2. FILTER AKUN
         if ($accountId !== 'all') {
             $query->where('trading_account_id', $accountId);
         } else {
-            $query->whereHas('tradingAccount', function ($q) use ($user) {
-                $q->where('user_id', $user->id);
-            });
+            $query->whereHas('tradingAccount', fn($q) => $q->where('user_id', $user->id));
         }
 
-        // --- SORTING DATA ---
-        $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
-        
-        /**
-         * [PERBAIKAN] Eager Loading relasi 'transactions'.
-         * Menambahkan 'transactions' ke dalam with() agar data DCA/Sell parsial 
-         * terkirim ke frontend untuk perhitungan Accumulative Fees.
-         */
-       // --- SORTING DATA ---
-        $sortField = ($type === 'SPOT') ? 'buy_date' : (($type === 'RESULT') ? 'exit_date' : 'entry_date');
-
-        /**
-        * [FIX] Eager Loading Kondisional
-        * Kita hanya memanggil relasi 'transactions' jika tipe-nya adalah SPOT.
-        * Karena model FuturesTrade tidak memiliki relasi ini.
-        */
-        $relations = ['tradingAccount'];
-
-        if ($type === 'SPOT') {
-        $relations[] = 'transactions';
+        // 3. SORTING
+        if ($type === 'RESULT' && $resultType === 'SPOT') {
+            $sortField = 'sell_date'; // Urutkan berdasarkan tanggal jual
+        } elseif ($type === 'SPOT') {
+            $sortField = 'buy_date';
+        } elseif ($type === 'RESULT') {
+            $sortField = 'exit_date';
+        } else {
+            $sortField = 'entry_date';
         }
 
         $trades = $query->with($relations)->latest($sortField)->get();
         $accounts = $user->tradingAccounts;
 
-        // --- HITUNG BALANCE TERPISAH ---
+        // 4. HITUNG BALANCE (DINAMIS SESUAI TAB)
         $spotBalance = $user->tradingAccounts()->where('strategy_type', 'SPOT')->sum('balance');
         $futuresBalance = $user->tradingAccounts()->where('strategy_type', 'FUTURES')->sum('balance');
-        $balanceType = ($type === 'RESULT') ? 'FUTURES' : $type;
-        $totalBalance = $user->tradingAccounts()->where('strategy_type', $balanceType)->sum('balance');
+        
+        // Jika di tab result, tampilkan saldo sesuai result_type
+        if ($type === 'RESULT') {
+            $totalBalance = ($resultType === 'SPOT') ? $spotBalance : $futuresBalance;
+        } else {
+            $balanceType = ($type === 'SPOT') ? 'SPOT' : 'FUTURES';
+            $totalBalance = $user->tradingAccounts()->where('strategy_type', $balanceType)->sum('balance');
+        }
 
         return Inertia::render('TradeLog/Index', [
             'trades' => $trades,
@@ -81,7 +88,8 @@ class TradeLogController extends Controller
             'totalBalance' => $totalBalance,
             'spotBalance' => $spotBalance,
             'futuresBalance' => $futuresBalance,
-            'selectedAccountId' => $accountId
+            'selectedAccountId' => $accountId,
+            'currentResultTab' => $resultType // Kirim balik ke frontend
         ]);
     }
 

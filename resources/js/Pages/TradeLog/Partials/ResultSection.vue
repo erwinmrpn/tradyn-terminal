@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+// Hapus ref lokal, ganti dengan props & emit
+// import { ref } from 'vue'; // HAPUS INI
 
-// Import komponen anak
-// Pastikan folder ResultPartials ada di dalam folder Partials
 import ResultFutures from './ResultPartials/ResultFutures.vue';
 import ResultSpot from './ResultPartials/ResultSpot.vue';
 
-// --- PROPS ---
-// Menerima data trades dari parent agar diteruskan ke anak
+// Terima activeTab dari Parent
 const props = defineProps<{
     trades?: any[]; 
+    activeTab: 'SPOT' | 'FUTURES'; // [BARU] Terima status tab dari Index.vue
 }>();
 
-// --- STATE ---
-const activeTab = ref<'SPOT' | 'FUTURES'>('FUTURES'); 
+// Definisikan event untuk memberitahu Parent
+const emit = defineEmits(['update:activeTab']);
+
+// Fungsi helper untuk ganti tab
+const switchTab = (tab: 'SPOT' | 'FUTURES') => {
+    emit('update:activeTab', tab); // Kirim sinyal ke Index.vue
+};
 </script>
 
 <template>
@@ -23,7 +27,7 @@ const activeTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
             <div class="bg-[#0f1012] p-1.5 rounded-full inline-flex border border-[#2d2f36] shadow-inner relative z-0">
                 
                 <button 
-                    @click="activeTab = 'SPOT'" 
+                    @click="switchTab('SPOT')" 
                     class="relative px-6 md:px-8 py-2 md:py-2.5 rounded-full text-xs md:text-sm font-bold overflow-hidden transition-all duration-500 group"
                     :class="activeTab === 'SPOT' 
                         ? 'text-white shadow-[0_0_20px_rgba(140,82,255,0.4)]' 
@@ -38,7 +42,7 @@ const activeTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
                 </button>
 
                 <button 
-                    @click="activeTab = 'FUTURES'" 
+                    @click="switchTab('FUTURES')" 
                     class="relative px-6 md:px-8 py-2 md:py-2.5 rounded-full text-xs md:text-sm font-bold overflow-hidden transition-all duration-500 group"
                     :class="activeTab === 'FUTURES' 
                         ? 'text-white shadow-[0_0_20px_rgba(140,82,255,0.4)]' 
@@ -73,7 +77,6 @@ const activeTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
 </template>
 
 <style scoped>
-/* --- ANIMASI TRANSISI HALAMAN --- */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -81,11 +84,11 @@ const activeTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
 
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateY(15px); /* Muncul dari bawah */
+  transform: translateY(15px);
 }
 
 .fade-slide-leave-to {
   opacity: 0;
-  transform: translateY(-15px); /* Hilang ke atas */
+  transform: translateY(-15px);
 }
 </style>

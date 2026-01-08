@@ -20,9 +20,11 @@ const props = defineProps<{
     spotBalance: number;
     futuresBalance: number;
     selectedAccountId: string;
+    // [BARU] Menerima info tab result dari controller
+    currentResultTab?: 'SPOT' | 'FUTURES'; 
 }>();
 
-// --- STATE MODALS ---
+// --- STATE MODALS (FITUR LAMA TETAP ADA) ---
 const showDeleteModal = ref(false);
 const tradeToDelete = ref<any>(null);
 const showNoteModal = ref(false);
@@ -32,7 +34,7 @@ const showImageModal = ref(false);
 const selectedImageUrl = ref('');
 const selectedImageName = ref('');
 
-// --- ACTIONS ---
+// --- ACTIONS MODAL (FITUR LAMA TETAP ADA) ---
 const confirmDelete = (trade: any) => { tradeToDelete.value = trade; showDeleteModal.value = true; };
 const cancelDelete = () => { showDeleteModal.value = false; tradeToDelete.value = null; };
 const proceedDelete = () => {
@@ -67,23 +69,35 @@ const downloadImage = () => {
 };
 
 // --- LOGIC UTAMA ---
+const selectedAccount = ref(props.selectedAccountId);
+
+// [UPDATE] Inisialisasi resultSubTab menggunakan props dari controller agar tidak reset saat refresh
+const resultSubTab = ref<'SPOT' | 'FUTURES'>(props.currentResultTab || 'FUTURES');
+
+const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
+const spotTab = ref<'BUY' | 'SELL'>('BUY'); 
+
+// [UPDATE] Filter akun agar sesuai dengan Tab Result yang sedang aktif (Spot/Futures)
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
-    let filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
+    
+    let filterType = props.activeType;
+    if (props.activeType === 'RESULT') {
+        // Jika di tab Result, ikuti sub-tab nya
+        filterType = resultSubTab.value === 'SPOT' ? 'SPOT' : 'FUTURES';
+    } else {
+        // Jika tidak, ikuti activeType (SPOT atau FUTURES)
+        filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
+    }
+    
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
+// [UPDATE] Display balance mengambil langsung dari props.totalBalance 
+// (karena controller sekarang sudah mengirim nilai yang benar sesuai tab)
 const displayedBalance = computed(() => {
-    if (props.activeType === 'SPOT') return props.spotBalance;
-    if (props.activeType === 'FUTURES') return props.futuresBalance;
-    if (props.activeType === 'RESULT') return resultSubTab.value === 'SPOT' ? props.spotBalance : props.futuresBalance;
-    return 0;
+    return props.totalBalance;
 });
-
-const selectedAccount = ref(props.selectedAccountId);
-const resultSubTab = ref<'SPOT' | 'FUTURES'>('FUTURES');
-const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
-const spotTab = ref<'BUY' | 'SELL'>('BUY'); 
 
 // Auto Select Account
 const applySmartDefaults = () => {
@@ -94,12 +108,34 @@ const applySmartDefaults = () => {
     }
 };
 
-watch(resultSubTab, () => { if (props.activeType === 'RESULT') applySmartDefaults(); });
+// [PENTING] Watcher ini yang memperbaiki masalah Result Spot kosong
+// Saat tombol di ResultSection diklik -> resultSubTab berubah -> Request data baru ke server
+watch(resultSubTab, (newVal) => { 
+    if (props.activeType === 'RESULT') {
+        router.get(
+            route('trade.log'), 
+            { 
+                type: 'RESULT', 
+                result_type: newVal, // Kirim parameter result_type (SPOT/FUTURES)
+                account_id: selectedAccount.value 
+            }, 
+            { preserveState: true, preserveScroll: true }
+        );
+    }
+    applySmartDefaults(); 
+});
+
+// Update watch selectedAccount untuk membawa parameter result_type
 watch(selectedAccount, (newAccount) => {
     if (newAccount && newAccount !== props.selectedAccountId) {
-        router.get(route('trade.log'), { type: props.activeType, account_id: newAccount }, { preserveState: true, preserveScroll: true });
+        let params: any = { type: props.activeType, account_id: newAccount };
+        if (props.activeType === 'RESULT') {
+            params.result_type = resultSubTab.value;
+        }
+        router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
     }
 });
+
 watch(() => props.activeType, () => {
     if (props.activeType === 'FUTURES') futuresTab.value = 'OPEN';
     if (props.activeType === 'SPOT') spotTab.value = 'BUY';
@@ -117,8 +153,13 @@ const toggleSidebar = () => {
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
+// Update switchTab untuk membawa parameter result_type
 const switchTab = (type: string) => {
-    router.get(route('trade.log'), { type: type, account_id: 'all' }, { preserveState: true, preserveScroll: true });
+    let params: any = { type: type, account_id: 'all' };
+    if (type === 'RESULT') {
+        params.result_type = resultSubTab.value;
+    }
+    router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 };
 
 // --- HELPERS / FORMATTERS ---
@@ -169,7 +210,9 @@ const getHoldingClass = (period: string) => {
 
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
-                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance</div>
+                        <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
+                            Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance
+                        </div>
                         <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(displayedBalance) }}</div>
                     </div>
                     <div class="relative w-full sm:w-64">
@@ -208,7 +251,10 @@ const getHoldingClass = (period: string) => {
                 </div>
 
                 <div v-if="props.activeType === 'RESULT'">
-                    <ResultSection v-model:activeTab="resultSubTab" :trades="props.trades" />
+                    <ResultSection 
+                        v-model:activeTab="resultSubTab" 
+                        :trades="props.trades" 
+                    />
                 </div>
 
                 <div v-if="(props.activeType === 'SPOT' && spotTab === 'BUY') || (props.activeType === 'FUTURES' && futuresTab === 'OPEN')" class="bg-[#121317] border border-[#1f2128] rounded-xl overflow-hidden shadow-sm min-h-[400px]">
