@@ -100,7 +100,7 @@ const form = useForm({
 });
 
 // --- SMART INPUT LOGIC ---
-// Watcher untuk Slider Persentase Sell (FIX: Konversi ke String untuk hindari TS Error)
+// Watcher untuk Slider Persentase Sell (Fix: Konversi ke String)
 watch(sellPercentage, (newPercent) => {
     if (transactionType.value === 'SELL' && currentHoldingQty.value > 0) {
         if (newPercent === 0) {
@@ -230,7 +230,6 @@ const viewChart = (path: string) => {
     emit('view-chart', path, 'Buy');
 };
 
-// --- FORMATTERS ---
 const formatCurrency = (val: any) => {
     const num = parseNumber(val);
     if (num === 0) return '-';
@@ -261,7 +260,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
 
 <template>
     <div class="w-full">
-        
         <div class="flex items-center gap-2 mb-6">
             <div class="w-1 h-4 bg-[#8c52ff] rounded-full"></div>
             <h3 class="text-sm font-bold text-white uppercase tracking-wider">Spot Active Holdings</h3>
@@ -288,11 +286,8 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
             <div v-for="trade in holdingTrades" :key="trade.id" class="relative group">
-                
                 <div class="p-[2px] rounded-2xl bg-gradient-to-br from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_15px_rgba(140,82,255,0.15)] hover:shadow-[0_0_25px_rgba(92,225,230,0.3)] transition-all duration-300 h-full">
-                    
                     <div class="bg-[#0f1012] rounded-2xl h-full flex flex-col justify-between overflow-hidden relative">
-                        
                         <div class="p-5">
                             <div class="flex justify-between items-start mb-6">
                                 <div class="flex flex-col">
@@ -347,7 +342,6 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                         </div>
 
                         <div v-if="expandedFormId === trade.id" class="bg-[#1a1b20] p-5 border-t border-b border-[#2d2f36] animate-fade-in-down relative">
-                            
                             <div class="flex p-1 bg-[#0f1012] rounded-lg mb-4 border border-[#2d2f36]">
                                 <button @click="switchMode('BUY')" 
                                     class="flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded transition-all"
@@ -420,11 +414,19 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
                                         <label class="text-[9px] font-bold text-gray-500 uppercase">Sell Percentage</label>
                                         <span class="text-xs font-bold text-red-400 font-mono">{{ sellPercentage }}%</span>
                                     </div>
-                                    <div class="relative">
+                                    <div class="relative px-1">
                                         <input type="range" v-model.number="sellPercentage" min="0" max="100" step="1"
-                                            class="w-full h-2 bg-[#0a0b0d] rounded-lg appearance-none cursor-pointer range-slider border border-[#2d2f36]"
+                                            class="w-full h-2 bg-[#0a0b0d] rounded-lg appearance-none cursor-pointer range-slider border border-[#2d2f36] relative z-10"
                                             :style="`background: linear-gradient(to right, #ef4444 ${sellPercentage}%, #0a0b0d ${sellPercentage}%)`">
-                                        <div class="flex justify-between text-[8px] text-gray-600 font-bold uppercase mt-1 px-1 font-mono">
+                                        
+                                        <div class="absolute top-[4px] left-0 w-full flex justify-between px-1 pointer-events-none z-0">
+                                            <span v-for="point in [0, 25, 50, 75, 100]" :key="point"
+                                                class="w-2 h-2 rounded-full border border-[#0a0b0d] transition-colors duration-300"
+                                                :class="sellPercentage >= point ? 'bg-[#ef4444]' : 'bg-[#2d2f36]'">
+                                            </span>
+                                        </div>
+
+                                        <div class="flex justify-between text-[8px] text-gray-600 font-bold uppercase mt-3 px-0.5 font-mono relative z-10">
                                             <span @click="sellPercentage = 0" class="cursor-pointer hover:text-gray-400">0%</span>
                                             <span @click="sellPercentage = 25" class="cursor-pointer hover:text-gray-400">25%</span>
                                             <span @click="sellPercentage = 50" class="cursor-pointer hover:text-gray-400">50%</span>
@@ -559,30 +561,36 @@ input[type=number]::-webkit-outer-spin-button {
   margin: 0; 
 }
 input[type=number] {
+  -webkit-appearance: none;
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
-/* Styling untuk Range Slider */
+/* RANGE SLIDER STYLING */
 .range-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background: #ef4444;
     border-radius: 50%;
     cursor: pointer;
-    border: 2px solid #0a0b0d;
-    box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
+    border: 3px solid #0a0b0d;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+    position: relative;
+    z-index: 20;
 }
 
 .range-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background: #ef4444;
     border-radius: 50%;
     cursor: pointer;
-    border: 2px solid #0a0b0d;
-    box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
+    border: 3px solid #0a0b0d;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+    position: relative;
+    z-index: 20;
 }
 
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
