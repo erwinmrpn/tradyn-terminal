@@ -10,6 +10,11 @@ const props = defineProps<{
 const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK');
 const expandedCards = ref<Set<number>>(new Set());
 
+// [BARU] State untuk Modal Gambar
+const showImageModal = ref(false);
+const selectedImageUrl = ref('');
+const selectedImageTitle = ref('');
+
 // --- HELPERS: DATE ---
 const getStartOfDay = (date: Date) => { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; };
 const getStartOfWeek = (date: Date) => { const d = new Date(date); const day = d.getDay() || 7; if (day !== 1) d.setHours(-24 * (day - 1)); d.setHours(0, 0, 0, 0); return d; };
@@ -24,6 +29,28 @@ const toggleExpand = (id: number) => {
 const getDateTime = (dateStr: string, timeStr: string) => {
     if (!dateStr || !timeStr) return null;
     return new Date(`${dateStr}T${timeStr}`);
+};
+
+// [BARU] Fungsi Modal Gambar
+const openImageModal = (path: string, title: string) => {
+    selectedImageUrl.value = `/storage/${path}`;
+    selectedImageTitle.value = title;
+    showImageModal.value = true;
+};
+
+const closeImageModal = () => {
+    showImageModal.value = false;
+    selectedImageUrl.value = '';
+};
+
+const downloadImage = () => {
+    if (!selectedImageUrl.value) return;
+    const link = document.createElement('a');
+    link.href = selectedImageUrl.value;
+    link.download = `${selectedImageTitle.value.replace(/\s+/g, '_')}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 };
 
 // --- LOGIC: FILTER TRADES ---
@@ -368,8 +395,8 @@ const getComparisonLabel = () => {
                             </div>
 
                             <div class="flex gap-2 pt-2">
-                                <a v-if="trade.entry_screenshot" :href="'/storage/' + trade.entry_screenshot" target="_blank" class="flex-1 text-center text-[10px] py-2 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors font-bold uppercase tracking-wider">Entry Chart</a>
-                                <a v-if="trade.exit_screenshot" :href="'/storage/' + trade.exit_screenshot" target="_blank" class="flex-1 text-center text-[10px] py-2 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors font-bold uppercase tracking-wider">Exit Chart</a>
+                                <button v-if="trade.entry_screenshot" @click="openImageModal(trade.entry_screenshot, 'Entry Chart')" class="flex-1 text-center text-[10px] py-2 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors font-bold uppercase tracking-wider">Entry Chart</button>
+                                <button v-if="trade.exit_screenshot" @click="openImageModal(trade.exit_screenshot, 'Exit Chart')" class="flex-1 text-center text-[10px] py-2 rounded border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors font-bold uppercase tracking-wider">Exit Chart</button>
                             </div>
                         </div>
 
@@ -391,10 +418,31 @@ const getComparisonLabel = () => {
 
         </div>
 
+        <div v-if="showImageModal" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" @click.self="closeImageModal">
+            <div class="bg-[#121317] border border-[#1f2128] rounded-xl w-full max-w-4xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+                <div class="flex justify-between items-center p-4 border-b border-[#1f2128] bg-[#1a1b20]">
+                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> 
+                        {{ selectedImageTitle }}
+                    </h3>
+                    <button @click="closeImageModal" class="text-gray-500 hover:text-white transition-colors p-1 rounded-full hover:bg-[#2d2f36]"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                </div>
+                <div class="flex-1 p-4 overflow-auto flex justify-center items-center bg-[#0a0b0d]">
+                    <img :src="selectedImageUrl" alt="Chart Screenshot" class="max-w-full max-h-[70vh] object-contain rounded-lg border border-[#2d2f36] shadow-lg" @error="selectedImageUrl = '/images/placeholder-chart.png'">
+                </div>
+                <div class="p-4 border-t border-[#1f2128] bg-[#1a1b20] flex justify-end gap-3">
+                     <button @click="closeImageModal" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-400 bg-transparent hover:bg-[#2d2f36] border border-transparent hover:border-[#2d2f36] transition-all">Close</button>
+                    <button @click="downloadImage" class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-900/20 transition-all"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg> Download Image</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 </template>
 
 <style scoped>
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-in-down { animation: fadeInDown 0.3s ease-out forwards; }
+@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
 </style>

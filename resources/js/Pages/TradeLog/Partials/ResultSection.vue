@@ -1,22 +1,24 @@
 <script setup lang="ts">
-// Hapus ref lokal, ganti dengan props & emit
-// import { ref } from 'vue'; // HAPUS INI
-
+// Import komponen anak
 import ResultFutures from './ResultPartials/ResultFutures.vue';
 import ResultSpot from './ResultPartials/ResultSpot.vue';
 
-// Terima activeTab dari Parent
+// --- PROPS ---
+// Menerima data dari Parent (Index.vue)
 const props = defineProps<{
     trades?: any[]; 
-    activeTab: 'SPOT' | 'FUTURES'; // [BARU] Terima status tab dari Index.vue
+    activeTab: 'SPOT' | 'FUTURES'; // [DIKEMBALIKAN] Terima status tab dari parent
+    metrics?: any;                 // [WAJIB ADA] Data summary untuk ResultSpot
+    selectedPeriod?: string;       // [WAJIB ADA] Filter periode untuk ResultSpot
 }>();
 
-// Definisikan event untuk memberitahu Parent
+// --- EMITS ---
+// Memberitahu Parent jika tab berubah
 const emit = defineEmits(['update:activeTab']);
 
 // Fungsi helper untuk ganti tab
 const switchTab = (tab: 'SPOT' | 'FUTURES') => {
-    emit('update:activeTab', tab); // Kirim sinyal ke Index.vue
+    emit('update:activeTab', tab); // Kirim sinyal ke Index.vue untuk handle logic data
 };
 </script>
 
@@ -61,9 +63,12 @@ const switchTab = (tab: 'SPOT' | 'FUTURES') => {
 
         <div class="relative min-h-[300px]"> 
             <Transition name="fade-slide" mode="out-in">
+                
                 <ResultSpot 
                     v-if="activeTab === 'SPOT'" 
                     :trades="props.trades || []" 
+                    :metrics="props.metrics"
+                    :selected-period="props.selectedPeriod || 'all'"
                 />
                 
                 <ResultFutures 

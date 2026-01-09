@@ -254,6 +254,7 @@ const getHoldingClass = (period: string) => {
                     <ResultSection 
                         v-model:activeTab="resultSubTab" 
                         :trades="props.trades" 
+                        @view-image="openImageModal" 
                     />
                 </div>
 
