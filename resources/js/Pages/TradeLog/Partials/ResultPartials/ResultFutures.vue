@@ -7,10 +7,11 @@ const props = defineProps<{
 }>();
 
 // --- STATE ---
-const timeFrame = ref<'TODAY' | 'WEEK' | 'MONTH'>('WEEK');
+// [UPDATE] Default ke 'ALL'
+const timeFrame = ref<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>('ALL');
 const expandedCards = ref<Set<number>>(new Set());
 
-// [BARU] State untuk Modal Gambar
+// State untuk Modal Gambar
 const showImageModal = ref(false);
 const selectedImageUrl = ref('');
 const selectedImageTitle = ref('');
@@ -31,7 +32,7 @@ const getDateTime = (dateStr: string, timeStr: string) => {
     return new Date(`${dateStr}T${timeStr}`);
 };
 
-// [BARU] Fungsi Modal Gambar
+// Fungsi Modal Gambar
 const openImageModal = (path: string, title: string) => {
     selectedImageUrl.value = `/storage/${path}`;
     selectedImageTitle.value = title;
@@ -55,6 +56,16 @@ const downloadImage = () => {
 
 // --- LOGIC: FILTER TRADES ---
 const filterTradesByPeriod = (allTrades: any[], period: string, offset: number = 0) => {
+    // [UPDATE] Logika untuk ALL Time Frame
+    if (period === 'ALL') {
+        if (offset > 0) return []; // Tidak ada previous data untuk ALL
+        return [...allTrades].sort((a, b) => {
+            const timeA = new Date(a.exit_date + 'T' + (a.exit_time || '00:00')).getTime();
+            const timeB = new Date(b.exit_date + 'T' + (b.exit_time || '00:00')).getTime();
+            return timeB - timeA;
+        });
+    }
+
     const now = new Date();
     let startDate: Date, endDate: Date;
 
@@ -199,6 +210,7 @@ const getComparisonLabel = () => {
             
             <div class="p-[1px] rounded-lg bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6]">
                 <div class="flex bg-[#1a1b20] p-1 rounded-lg h-full">
+                    <button @click="timeFrame = 'ALL'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'ALL' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">All</button>
                     <button @click="timeFrame = 'TODAY'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'TODAY' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Today</button>
                     <button @click="timeFrame = 'WEEK'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'WEEK' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Week</button>
                     <button @click="timeFrame = 'MONTH'" class="px-4 py-1.5 text-[10px] font-bold uppercase rounded transition-all" :class="timeFrame === 'MONTH' ? 'bg-[#2d2f36] text-white shadow' : 'text-gray-500 hover:text-gray-300'">Month</button>
@@ -221,7 +233,7 @@ const getComparisonLabel = () => {
                             {{ currentMetrics.netPnL >= 0 ? '+' : '' }}{{ formatCurrency(currentMetrics.netPnL) }}
                         </h2>
                     </div>
-                    <div class="flex items-center gap-1.5 mt-1">
+                    <div v-if="timeFrame !== 'ALL'" class="flex items-center gap-1.5 mt-1">
                         <span class="text-[9px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-[#1a1b20] border border-[#2d2f36]"
                             :class="currentMetrics.netPnL >= previousMetrics.netPnL ? 'text-green-400' : 'text-red-400'">
                             <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -242,7 +254,7 @@ const getComparisonLabel = () => {
                             1 : {{ Math.abs(currentMetrics.avgRR).toFixed(1) }}
                         </div>
                     </div>
-                    <div class="text-[9px] font-medium text-gray-500 flex items-center gap-1">
+                    <div v-if="timeFrame !== 'ALL'" class="text-[9px] font-medium text-gray-500 flex items-center gap-1">
                         Risk Reward
                     </div>
                 </div>
@@ -313,8 +325,16 @@ const getComparisonLabel = () => {
                                             {{ trade.type }}
                                         </span>
                                     </div>
-                                    <div class="text-[10px] text-gray-400 mt-1 flex items-center gap-2">
-                                        <span class="bg-[#1f2128] px-1.5 py-0.5 rounded border border-gray-700">{{ trade.leverage }}x {{ trade.margin_mode }}</span>
+                                    <div class="text-[10px] text-gray-400 mt-1 flex flex-wrap items-center gap-2">
+                                        
+                                        <span class="bg-[#1f2128] px-1.5 py-0.5 rounded border border-gray-700 font-mono">
+                                            {{ trade.market_type || 'CRYPTO' }}
+                                        </span>
+
+                                        <span class="px-1.5 py-0.5 rounded border border-yellow-500/30 bg-yellow-500/10 text-yellow-500 font-mono font-bold tracking-tight">
+                                            {{ trade.leverage }}x {{ trade.margin_mode }}
+                                        </span>
+
                                         <span>{{ trade.trading_account?.name }}</span>
                                     </div>
                                 </div>

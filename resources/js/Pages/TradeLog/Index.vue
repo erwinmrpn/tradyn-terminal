@@ -20,11 +20,10 @@ const props = defineProps<{
     spotBalance: number;
     futuresBalance: number;
     selectedAccountId: string;
-    // [BARU] Menerima info tab result dari controller
     currentResultTab?: 'SPOT' | 'FUTURES'; 
 }>();
 
-// --- STATE MODALS (FITUR LAMA TETAP ADA) ---
+// --- STATE MODALS ---
 const showDeleteModal = ref(false);
 const tradeToDelete = ref<any>(null);
 const showNoteModal = ref(false);
@@ -34,7 +33,10 @@ const showImageModal = ref(false);
 const selectedImageUrl = ref('');
 const selectedImageName = ref('');
 
-// --- ACTIONS MODAL (FITUR LAMA TETAP ADA) ---
+// State untuk Expand/Collapse Draw Down History
+const expandedHistoryRows = ref<Set<number>>(new Set());
+
+// --- ACTIONS MODAL ---
 const confirmDelete = (trade: any) => { tradeToDelete.value = trade; showDeleteModal.value = true; };
 const cancelDelete = () => { showDeleteModal.value = false; tradeToDelete.value = null; };
 const proceedDelete = () => {
@@ -68,38 +70,36 @@ const downloadImage = () => {
     document.body.removeChild(link);
 };
 
+// Fungsi Toggle Draw Down
+const toggleHistoryRow = (id: number) => {
+    if (expandedHistoryRows.value.has(id)) {
+        expandedHistoryRows.value.delete(id);
+    } else {
+        expandedHistoryRows.value.add(id);
+    }
+};
+
 // --- LOGIC UTAMA ---
 const selectedAccount = ref(props.selectedAccountId);
-
-// [UPDATE] Inisialisasi resultSubTab menggunakan props dari controller agar tidak reset saat refresh
 const resultSubTab = ref<'SPOT' | 'FUTURES'>(props.currentResultTab || 'FUTURES');
-
 const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
 const spotTab = ref<'BUY' | 'SELL'>('BUY'); 
 
-// [UPDATE] Filter akun agar sesuai dengan Tab Result yang sedang aktif (Spot/Futures)
 const filteredAccounts = computed(() => {
     if (!props.accounts) return [];
-    
     let filterType = props.activeType;
     if (props.activeType === 'RESULT') {
-        // Jika di tab Result, ikuti sub-tab nya
         filterType = resultSubTab.value === 'SPOT' ? 'SPOT' : 'FUTURES';
     } else {
-        // Jika tidak, ikuti activeType (SPOT atau FUTURES)
         filterType = props.activeType === 'RESULT' ? 'FUTURES' : props.activeType;
     }
-    
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
-// [UPDATE] Display balance mengambil langsung dari props.totalBalance 
-// (karena controller sekarang sudah mengirim nilai yang benar sesuai tab)
 const displayedBalance = computed(() => {
     return props.totalBalance;
 });
 
-// Auto Select Account
 const applySmartDefaults = () => {
     if (filteredAccounts.value.length > 0) {
         const firstAccountID = filteredAccounts.value[0].id;
@@ -108,30 +108,21 @@ const applySmartDefaults = () => {
     }
 };
 
-// [PENTING] Watcher ini yang memperbaiki masalah Result Spot kosong
-// Saat tombol di ResultSection diklik -> resultSubTab berubah -> Request data baru ke server
 watch(resultSubTab, (newVal) => { 
     if (props.activeType === 'RESULT') {
         router.get(
             route('trade.log'), 
-            { 
-                type: 'RESULT', 
-                result_type: newVal, // Kirim parameter result_type (SPOT/FUTURES)
-                account_id: selectedAccount.value 
-            }, 
+            { type: 'RESULT', result_type: newVal, account_id: selectedAccount.value }, 
             { preserveState: true, preserveScroll: true }
         );
     }
     applySmartDefaults(); 
 });
 
-// Update watch selectedAccount untuk membawa parameter result_type
 watch(selectedAccount, (newAccount) => {
     if (newAccount && newAccount !== props.selectedAccountId) {
         let params: any = { type: props.activeType, account_id: newAccount };
-        if (props.activeType === 'RESULT') {
-            params.result_type = resultSubTab.value;
-        }
+        if (props.activeType === 'RESULT') params.result_type = resultSubTab.value;
         router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
     }
 });
@@ -153,12 +144,9 @@ const toggleSidebar = () => {
     localStorage.setItem("sidebar_collapsed", String(isSidebarCollapsed.value));
 }
 
-// Update switchTab untuk membawa parameter result_type
 const switchTab = (type: string) => {
     let params: any = { type: type, account_id: 'all' };
-    if (type === 'RESULT') {
-        params.result_type = resultSubTab.value;
-    }
+    if (type === 'RESULT') params.result_type = resultSubTab.value;
     router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 };
 
@@ -166,7 +154,6 @@ const switchTab = (type: string) => {
 const formatCurrency = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 const formatTimeShort = (timeString: string) => timeString ? timeString.slice(0, 5) : '';
 
-// [BARU] Fungsi hitung total accumulative fee untuk history log
 const calculateTotalFee = (trade: any) => {
     const initialFee = parseFloat(trade.fee || 0);
     const transactionFees = trade.transactions ? trade.transactions.reduce((sum: number, t: any) => sum + parseFloat(t.fee || 0), 0) : 0;
@@ -193,7 +180,6 @@ const getHoldingClass = (period: string) => {
                 
                 <div class="flex flex-col items-center justify-center space-y-6">
                     <div class="bg-[#1a1b20] p-1 rounded-full flex items-center w-full max-w-lg border border-[#2d2f36] relative shadow-inner">
-                        
                         <div class="absolute top-1 bottom-1 w-[calc(33.33%_-_4px)] rounded-full transition-all duration-300 ease-out z-0 bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-[0_0_20px_rgba(140,82,255,0.5)]" 
                             :class="{
                                 'left-1': props.activeType === 'SPOT',
@@ -201,7 +187,6 @@ const getHoldingClass = (period: string) => {
                                 'left-[calc(66.66%_+_2px)]': props.activeType === 'RESULT'
                             }">
                         </div>
-
                         <button @click="switchTab('SPOT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'SPOT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">SPOT</button>
                         <button @click="switchTab('FUTURES')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'FUTURES' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">FUTURES</button>
                         <button @click="switchTab('RESULT')" class="flex-1 py-2 rounded-full text-xs sm:text-sm font-bold z-10 relative transition-colors" :class="props.activeType === 'RESULT' ? 'text-white' : 'text-gray-500 hover:text-gray-300'">RESULT</button>
@@ -264,7 +249,7 @@ const getHoldingClass = (period: string) => {
                         <span class="text-[10px] text-gray-600">Recent activity</span>
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="min-w-full text-left">
+                        <table class="min-w-full text-left border-collapse">
                             <thead class="bg-[#1a1b20] text-gray-400 uppercase text-[10px] tracking-wider font-semibold">
                                 <tr>
                                     <th class="px-6 py-3">Asset</th>
@@ -291,103 +276,183 @@ const getHoldingClass = (period: string) => {
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-[#1f2128]">
-                                <tr v-for="trade in props.trades" :key="trade.id" class="hover:bg-[#1a1b20]/50 transition-colors group text-sm">
-                                    
-                                    <td class="px-6 py-3 font-bold text-white">{{ trade.symbol }}<span class="text-[10px] text-gray-500 font-normal ml-1 bg-[#1f2128] px-1 rounded">{{ trade.trading_account ? trade.trading_account.name : 'Account' }}</span></td>
-                                    
-                                    <td class="px-6 py-3 text-xs">
-                                        <div class="flex flex-col gap-1">
-                                            <div class="flex items-center gap-1.5">
-                                                <span class="text-[9px] uppercase font-bold text-blue-500 bg-blue-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'BUY' : 'IN' }}</span>
-                                                <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.buy_date : trade.entry_date }}</span>
-                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.buy_time : trade.entry_time) }}</span>
+                                <template v-for="trade in props.trades" :key="trade.id">
+                                    <tr class="hover:bg-[#1a1b20]/50 transition-colors group text-sm" :class="{'bg-[#1a1b20]/30': expandedHistoryRows.has(trade.id)}">
+                                        
+                                        <td class="px-6 py-3">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-bold text-white">{{ trade.symbol }}</span>
+                                                <span class="text-[10px] font-normal text-gray-400 bg-[#1f2128] px-1.5 py-0.5 rounded border border-gray-700 whitespace-nowrap truncate max-w-[120px]" title="Account">
+                                                    {{ trade.trading_account ? trade.trading_account.name : '-' }}
+                                                </span>
                                             </div>
-                                            <div v-if="(props.activeType === 'SPOT' && trade.sell_date) || (props.activeType === 'FUTURES' && trade.exit_date)" class="flex items-center gap-1.5">
-                                                <span class="text-[9px] uppercase font-bold text-yellow-500 bg-yellow-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'SELL' : 'OUT' }}</span>
-                                                <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.sell_date : trade.exit_date }}</span>
-                                                <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.sell_time : trade.exit_time) }}</span>
+                                            <div class="mt-1">
+                                                <span class="text-[9px] font-mono text-gray-500 uppercase tracking-wider bg-[#1f2128]/50 px-1.5 py-0.5 rounded border border-gray-800">
+                                                    {{ trade.market_type || 'CRYPTO' }}
+                                                </span>
                                             </div>
-                                        </div>
-                                    </td>
+                                        </td>
+                                        
+                                        <td class="px-6 py-3 text-xs">
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex items-center gap-1.5">
+                                                    <span class="text-[9px] uppercase font-bold text-blue-500 bg-blue-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'BUY' : 'IN' }}</span>
+                                                    <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.buy_date : trade.entry_date }}</span>
+                                                    <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.buy_time : trade.entry_time) }}</span>
+                                                </div>
+                                                <div v-if="(props.activeType === 'SPOT' && trade.sell_date) || (props.activeType === 'FUTURES' && trade.exit_date)" class="flex items-center gap-1.5">
+                                                    <span class="text-[9px] uppercase font-bold text-yellow-500 bg-yellow-500/10 px-1 rounded">{{ props.activeType === 'SPOT' ? 'SELL' : 'OUT' }}</span>
+                                                    <span class="text-gray-300 font-mono">{{ props.activeType === 'SPOT' ? trade.sell_date : trade.exit_date }}</span>
+                                                    <span class="text-gray-500 text-[10px]">{{ formatTimeShort(props.activeType === 'SPOT' ? trade.sell_time : trade.exit_time) }}</span>
+                                                </div>
+                                            </div>
+                                        </td>
 
-                                    <td class="px-6 py-3" v-if="props.activeType === 'FUTURES'">
-                                        <span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span>
-                                    </td>
+                                        <td class="px-6 py-3" v-if="props.activeType === 'FUTURES'">
+                                            <span class="px-2 py-0.5 text-[10px] font-bold rounded uppercase border" :class="['BUY', 'LONG'].includes(trade.type) ? 'text-green-400 bg-green-900/10 border-green-500/20' : 'text-red-400 bg-red-900/10 border-red-500/20'">{{ trade.type }}</span>
+                                        </td>
 
-                                    <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(props.activeType === 'SPOT' ? trade.price : trade.entry_price) }}</td>
-                                    
-                                    <td class="px-6 py-3 text-right text-xs font-mono">
-                                        <div>{{ Number(trade.quantity) }}</div>
-                                        <div class="text-[10px] text-gray-500" v-if="props.activeType === 'SPOT' && trade.price && trade.quantity">
-                                            ≈ {{ formatCurrency(parseFloat(trade.price) * parseFloat(trade.quantity)) }}
-                                        </div>
-                                    </td>
-                                    
-                                    <template v-if="props.activeType === 'SPOT'">
-                                        <td class="px-6 py-3 text-center text-xs">
-                                            <span class="px-2 py-1 rounded border text-[10px] font-bold uppercase" :class="getHoldingClass(trade.holding_period)">
-                                                {{ trade.holding_period?.replace(' Term', '') }}
+                                        <td class="px-6 py-3 text-right text-gray-300 font-mono">{{ formatCurrency(props.activeType === 'SPOT' ? trade.price : trade.entry_price) }}</td>
+                                        
+                                        <td class="px-6 py-3 text-right text-xs font-mono">
+                                            <div>{{ Number(trade.quantity) }}</div>
+                                            <div class="text-[10px] text-gray-500" v-if="props.activeType === 'SPOT' && trade.price && trade.quantity">
+                                                ≈ {{ formatCurrency(parseFloat(trade.price) * parseFloat(trade.quantity)) }}
+                                            </div>
+                                        </td>
+                                        
+                                        <template v-if="props.activeType === 'SPOT'">
+                                            <td class="px-6 py-3 text-center text-xs">
+                                                <span class="px-2 py-1 rounded border text-[10px] font-bold uppercase" :class="getHoldingClass(trade.holding_period)">
+                                                    {{ trade.holding_period?.replace(' Term', '') }}
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-3 text-right text-xs font-mono text-emerald-500">
+                                                {{ formatCurrency(calculateTotalFee(trade)) }}
+                                            </td>
+                                            <td class="px-6 py-3 text-right text-xs font-mono font-bold" :class="trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'">
+                                                {{ trade.pnl ? formatCurrency(trade.pnl) : '$0.00' }}
+                                            </td>
+                                        </template>
+                                        <template v-else>
+                                            <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.margin) }}</td>
+                                            <td class="px-6 py-3 text-center text-yellow-500 text-xs font-bold">{{ trade.leverage }}x</td>
+                                        </template>
+
+                                        <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
+                                            <div class="flex flex-col items-end gap-1">
+                                                <button v-if="trade.entry_screenshot || trade.buy_screenshot" @click.prevent="openImageModal(trade.entry_screenshot || trade.buy_screenshot, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
+                                                    {{ props.activeType === 'SPOT' ? 'Buy Chart' : 'Entry Chart' }}
+                                                </button>
+                                                <button v-if="trade.exit_screenshot || trade.sell_screenshot" @click.prevent="openImageModal(trade.exit_screenshot || trade.sell_screenshot, props.activeType === 'SPOT' ? 'Sell' : 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">
+                                                    {{ props.activeType === 'SPOT' ? 'Sell Chart' : 'Exit Chart' }}
+                                                </button>
+                                                <span v-if="!trade.entry_screenshot && !trade.buy_screenshot && !trade.exit_screenshot && !trade.sell_screenshot" class="text-gray-600">-</span>
+                                            </div>
+                                        </td>
+                                        
+                                        <td class="px-6 py-3 text-right font-bold text-xs font-mono">
+                                            <div class="flex flex-col items-end gap-1">
+                                                <button v-if="trade.entry_notes || trade.buy_notes" 
+                                                    @click="viewNote(trade.entry_notes || trade.buy_notes, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" 
+                                                    class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
+                                                    {{ props.activeType === 'SPOT' ? 'Buy Note' : 'Entry Note' }}
+                                                </button>
+                                                <button v-if="trade.exit_notes || trade.sell_notes" 
+                                                    @click="viewNote(trade.exit_notes || trade.sell_notes, props.activeType === 'SPOT' ? 'Sell' : (trade.status === 'CANCELLED' ? 'Cancel' : 'Close'))" 
+                                                    class="text-yellow-400 hover:text-yellow-300 underline focus:outline-none text-[10px]">
+                                                    {{ props.activeType === 'SPOT' ? 'Sell Note' : (trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note') }}
+                                                </button>
+                                                <span v-if="!trade.entry_notes && !trade.buy_notes && !trade.exit_notes && !trade.sell_notes" class="text-gray-600">-</span>
+                                            </div>
+                                        </td>
+                                        
+                                        <td class="px-6 py-3 text-center">
+                                            <span v-if="trade.status === 'OPEN' && props.activeType === 'SPOT'" 
+                                                class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-yellow-500/20 text-yellow-500 border border-yellow-500/20">
+                                                HOLDING
+                                            </span>
+                                            <span v-else-if="trade.status === 'OPEN' && props.activeType === 'FUTURES'" 
+                                                class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-blue-900/20 text-blue-400 border border-blue-500/20">
+                                                OPEN
+                                            </span>
+                                            <span v-else class="px-2 py-1 text-[10px] font-bold rounded uppercase" 
+                                                :class="(trade.status === 'SOLD' || trade.status === 'CLOSED') ? 'bg-green-900/20 text-green-400 border border-green-500/20' : 'bg-red-900/20 text-red-400 border border-red-500/20'">
+                                                {{ trade.status }}
                                             </span>
                                         </td>
-                                        <td class="px-6 py-3 text-right text-xs font-mono text-emerald-500">
-                                            {{ formatCurrency(calculateTotalFee(trade)) }}
-                                        </td>
-                                        <td class="px-6 py-3 text-right text-xs font-mono font-bold" :class="trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'">
-                                            {{ trade.pnl ? formatCurrency(trade.pnl) : '$0.00' }}
-                                        </td>
-                                    </template>
-                                    <template v-else>
-                                        <td class="px-6 py-3 text-right text-blue-400 font-bold font-mono text-xs">{{ formatCurrency(trade.margin) }}</td>
-                                        <td class="px-6 py-3 text-center text-yellow-500 text-xs font-bold">{{ trade.leverage }}x</td>
-                                    </template>
 
-                                    <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
-                                        <div class="flex flex-col items-end gap-1">
-                                            <button v-if="trade.entry_screenshot || trade.buy_screenshot" @click.prevent="openImageModal(trade.entry_screenshot || trade.buy_screenshot, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
-                                                {{ props.activeType === 'SPOT' ? 'Buy Chart' : 'Entry Chart' }}
-                                            </button>
-                                            <button v-if="trade.exit_screenshot || trade.sell_screenshot" @click.prevent="openImageModal(trade.exit_screenshot || trade.sell_screenshot, props.activeType === 'SPOT' ? 'Sell' : 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">
-                                                {{ props.activeType === 'SPOT' ? 'Sell Chart' : 'Exit Chart' }}
-                                            </button>
-                                            <span v-if="!trade.entry_screenshot && !trade.buy_screenshot && !trade.exit_screenshot && !trade.sell_screenshot" class="text-gray-600">-</span>
-                                        </div>
-                                    </td>
-                                    
-                                    <td class="px-6 py-3 text-right font-bold text-xs font-mono">
-                                        <div class="flex flex-col items-end gap-1">
-                                            <button v-if="trade.entry_notes || trade.buy_notes" 
-                                                @click="viewNote(trade.entry_notes || trade.buy_notes, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" 
-                                                class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
-                                                {{ props.activeType === 'SPOT' ? 'Buy Note' : 'Entry Note' }}
-                                            </button>
-                                            <button v-if="trade.exit_notes || trade.sell_notes" 
-                                                @click="viewNote(trade.exit_notes || trade.sell_notes, props.activeType === 'SPOT' ? 'Sell' : (trade.status === 'CANCELLED' ? 'Cancel' : 'Close'))" 
-                                                class="text-yellow-400 hover:text-yellow-300 underline focus:outline-none text-[10px]">
-                                                {{ props.activeType === 'SPOT' ? 'Sell Note' : (trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note') }}
-                                            </button>
-                                            <span v-if="!trade.entry_notes && !trade.buy_notes && !trade.exit_notes && !trade.sell_notes" class="text-gray-600">-</span>
-                                        </div>
-                                    </td>
-                                    
-                                    <td class="px-6 py-3 text-center">
-                                        <span v-if="trade.status === 'OPEN' && props.activeType === 'SPOT'" 
-                                              class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-yellow-500/20 text-yellow-500 border border-yellow-500/20">
-                                            HOLDING
-                                        </span>
-                                        <span v-else-if="trade.status === 'OPEN' && props.activeType === 'FUTURES'" 
-                                              class="px-2 py-1 text-[10px] font-bold rounded uppercase bg-blue-900/20 text-blue-400 border border-blue-500/20">
-                                            OPEN
-                                        </span>
-                                        <span v-else class="px-2 py-1 text-[10px] font-bold rounded uppercase" 
-                                            :class="(trade.status === 'SOLD' || trade.status === 'CLOSED') ? 'bg-green-900/20 text-green-400 border border-green-500/20' : 'bg-red-900/20 text-red-400 border border-red-500/20'">
-                                            {{ trade.status }}
-                                        </span>
-                                    </td>
+                                        <td class="px-6 py-3 text-center">
+                                            <div class="flex items-center justify-center gap-3">
+                                                <button v-if="props.activeType === 'SPOT'" @click="toggleHistoryRow(trade.id)" class="text-[10px] text-blue-400 hover:text-blue-300 font-bold underline decoration-blue-500/30 hover:decoration-blue-300 transition-all">
+                                                    {{ expandedHistoryRows.has(trade.id) ? 'Hide Transactions' : 'More Transactions' }}
+                                                </button>
+                                                
+                                                <button @click="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-1.5 rounded-full hover:bg-red-500/10" title="Delete Trade">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
 
-                                    <td class="px-6 py-3 text-center">
-                                        <button @click="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-2 rounded-full hover:bg-red-500/10" title="Delete Trade"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
-                                    </td>
-                                </tr>
+                                    <tr v-if="expandedHistoryRows.has(trade.id)" class="bg-[#0a0b0d] border-b border-[#2d2f36] animate-fade-in">
+                                        <td colspan="12" class="p-0">
+                                            <div class="p-4 pl-12 pr-12 border-l-2 border-blue-500/50 ml-6 my-2 bg-[#0f1012] rounded-r-lg">
+                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                    Transaction History for {{ trade.symbol }}
+                                                </h4>
+                                                
+                                                <div v-if="trade.transactions && trade.transactions.length > 0" class="overflow-x-auto rounded border border-[#2d2f36]">
+                                                    <table class="w-full text-left text-xs">
+                                                        <thead class="bg-[#1a1b20] text-gray-500 font-bold uppercase">
+                                                            <tr>
+                                                                <th class="px-4 py-2">Date</th>
+                                                                <th class="px-4 py-2">Type</th>
+                                                                <th class="px-4 py-2 text-right">Price</th>
+                                                                <th class="px-4 py-2 text-right">Qty</th>
+                                                                <th class="px-4 py-2 text-right">Value</th>
+                                                                <th class="px-4 py-2 text-right text-red-400">Fee</th>
+                                                                <th class="px-4 py-2 text-center">Chart</th>
+                                                                <th class="px-4 py-2 text-center">Note</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody class="divide-y divide-[#1f2128]">
+                                                            <tr v-for="txn in trade.transactions" :key="txn.id" class="hover:bg-[#1a1b20]/30 text-gray-400">
+                                                                <td class="px-4 py-2">
+                                                                    <span class="text-gray-300">{{ txn.transaction_date }}</span>
+                                                                    <span class="ml-2 text-[10px] text-gray-600">{{ txn.transaction_time ? txn.transaction_time.slice(0,5) : '' }}</span>
+                                                                </td>
+                                                                <td class="px-4 py-2 font-bold" :class="txn.type === 'BUY' ? 'text-blue-400' : 'text-yellow-500'">{{ txn.type }}</td>
+                                                                <td class="px-4 py-2 text-right font-mono">{{ formatCurrency(txn.price) }}</td>
+                                                                <td class="px-4 py-2 text-right font-mono">{{ parseFloat(txn.quantity) }}</td>
+                                                                <td class="px-4 py-2 text-right font-mono text-gray-500">{{ formatCurrency(txn.price * txn.quantity) }}</td>
+                                                                <td class="px-4 py-2 text-right font-mono text-red-400">{{ txn.fee > 0 ? formatCurrency(txn.fee) : '-' }}</td>
+                                                                
+                                                                <td class="px-4 py-2 text-center">
+                                                                    <button v-if="txn.chart_image" @click="openImageModal(txn.chart_image, txn.type + ' Chart')" class="text-blue-400 hover:text-blue-300 underline text-[10px] focus:outline-none">
+                                                                        View
+                                                                    </button>
+                                                                    <span v-else class="text-gray-600">-</span>
+                                                                </td>
+
+                                                                <td class="px-4 py-2 text-center">
+                                                                    <button v-if="txn.notes" @click="viewNote(txn.notes, txn.type + ' Note')" class="text-yellow-400 hover:text-yellow-300 underline text-[10px] focus:outline-none">
+                                                                        Read
+                                                                    </button>
+                                                                    <span v-else class="text-gray-600">-</span>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div v-else class="text-center py-4 text-xs text-gray-600 border border-dashed border-[#2d2f36] rounded">
+                                                    No transaction details found.
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
                                 <tr v-if="props.trades.length === 0"><td colspan="12" class="px-6 py-12 text-center text-gray-500">No trades recorded yet.</td></tr>
                             </tbody>
                         </table>
