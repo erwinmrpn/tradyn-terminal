@@ -331,7 +331,7 @@ const getHoldingDuration = (dateStr: string, timeStr: string) => {
 
                             <div class="flex justify-between items-end">
                                 <div>
-                                    <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Total Value</div>
+                                    <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Total Value (Gross)</div>
                                     <div class="text-2xl font-black text-white tracking-tight">{{ formatCurrency(calculateTotalValue(getEntryPrice(trade), getQty(trade))) }}</div>
                                 </div>
                                 <div class="text-right">

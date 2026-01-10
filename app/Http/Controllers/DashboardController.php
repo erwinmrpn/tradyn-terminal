@@ -6,54 +6,81 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Auth;
 use App\Models\TradingAccount;
-use App\Models\SpotTrade;     // Model Baru
-use App\Models\FuturesTrade;  // Model Baru
+use App\Models\SpotTrade;
+use App\Models\FuturesTrade;
+use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
     public function index()
     {
         $userId = Auth::id();
+        $today = Carbon::today()->format('Y-m-d');
 
-        // 1. Hitung Total Balance (Dari semua akun user)
+        // 1. Hitung Total Balance
         $totalBalance = TradingAccount::where('user_id', $userId)->sum('balance');
 
-        // 2. Hitung Active Positions (Khusus Futures yang statusnya OPEN)
-        $activePositions = FuturesTrade::whereHas('tradingAccount', function ($q) use ($userId) {
+        // 2. Hitung Active Positions
+        // Futures: Status OPEN
+        $activeFutures = FuturesTrade::whereHas('tradingAccount', function ($q) use ($userId) {
             $q->where('user_id', $userId);
         })->where('status', 'OPEN')->count();
 
-        // 3. Today's PnL (Sementara 0, karena fitur Close Position belum dibuat)
-        // Nanti kita akan query ke tabel FuturesTrade yang statusnya CLOSED & tanggal hari ini
-        $todaysPnL = 0; 
+        // Spot: Status OPEN (Holding)
+        // Kita cek berdasarkan kolom 'status' di spot_trades
+        $activeSpot = SpotTrade::whereHas('tradingAccount', function ($q) use ($userId) {
+            $q->where('user_id', $userId);
+        })->where('status', 'OPEN')->count();
 
-        // 4. Ambil Recent Activity (Gabungan Spot & Futures)
+        $activePositions = $activeFutures + $activeSpot;
+
+        // 3. Today's PnL (Disesuaikan dengan Database yang Ada)
+        
+        // A. Futures PnL (Closed Hari Ini)
+        // Menggunakan exit_date sesuai migrasi yang ada
+        $futuresPnL = FuturesTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->where('status', 'CLOSED')
+            ->where('exit_date', $today)
+            ->sum('pnl');
+
+        // B. Spot PnL (Sold Hari Ini)
+        // KITA KEMBALIKAN KE TABEL INDUK (spot_trades)
+        // Karena tabel transaction Anda belum punya kolom pnl, kita ambil dari total PnL trade yang selesai hari ini.
+        $spotPnL = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->where('sell_date', $today) // Menggunakan sell_date dari tabel spot_trades
+            ->sum('pnl');
+
+        $todaysPnL = $futuresPnL + $spotPnL;
+
+        // 4. Ambil Recent Activity
         
         // Ambil 5 Spot Terakhir
+        // PERBAIKAN: Mengganti 'date' menjadi 'buy_date' agar tidak error column not found
         $recentSpot = SpotTrade::with('tradingAccount')
             ->whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
-            ->latest('date')
+            ->latest('buy_date') 
             ->take(5)
             ->get()
             ->map(function ($trade) {
-                $trade->category = 'SPOT'; // Label manual untuk UI
-                $trade->display_date = $trade->date; // Normalisasi tanggal
+                $trade->category = 'SPOT';
+                $trade->display_date = $trade->buy_date; // Mapping untuk sorting di frontend
                 return $trade;
             });
 
         // Ambil 5 Futures Terakhir
+        // Menggunakan entry_date (sesuai request Anda untuk tetap pakai date terpisah)
         $recentFutures = FuturesTrade::with('tradingAccount')
             ->whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
-            ->latest('entry_date')
+            ->latest('entry_date') 
             ->take(5)
             ->get()
             ->map(function ($trade) {
-                $trade->category = 'FUTURES'; // Label manual untuk UI
-                $trade->display_date = $trade->entry_date; // Normalisasi tanggal
+                $trade->category = 'FUTURES';
+                $trade->display_date = $trade->entry_date; // Mapping untuk sorting
                 return $trade;
             });
 
-        // Gabungkan dan Urutkan berdasarkan tanggal terbaru
+        // Gabungkan dan Urutkan
         $recentTrades = $recentSpot->concat($recentFutures)
             ->sortByDesc('display_date')
             ->take(5)
