@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers; // [FIX] Namespace disesuaikan
+namespace App\Http\Controllers; 
 
 use App\Http\Controllers\Controller;
 use App\Models\SpotTransaction;
@@ -19,11 +19,25 @@ class SpotController extends Controller
             'quantity' => 'required|numeric',
             'date' => 'required|date',
             'time' => 'required',
+            'realized_pnl' => 'nullable|numeric', // [BARU]
         ]);
 
         // 2. Gunakan DB Transaction agar aman
         DB::transaction(function () use ($request, $id) {
             
+            $trade = SpotTrade::findOrFail($id);
+
+            // [LOGIKA BARU] Hitung PnL Transaksi
+            $pnlToStore = null;
+            if ($request->type === 'SELL') {
+                if ($request->filled('realized_pnl')) {
+                    $pnlToStore = $request->realized_pnl;
+                } else {
+                    // Fallback calculation
+                    $pnlToStore = ($request->price - $trade->price) * $request->quantity;
+                }
+            }
+
             // A. Simpan Riwayat di Tabel Anak
             SpotTransaction::create([
                 'spot_trade_id' => $id,
@@ -31,14 +45,14 @@ class SpotController extends Controller
                 'price' => $request->price,
                 'quantity' => $request->quantity,
                 'fee' => $request->fee ?? 0,
+                // [FIX] Simpan PnL
+                'realized_pnl' => $pnlToStore,
                 'transaction_date' => $request->date,
                 'transaction_time' => $request->time,
                 'notes' => $request->notes,
             ]);
 
             // B. Update Data Induk (spot_trades)
-            $trade = SpotTrade::findOrFail($id);
-            
             if ($request->type === 'BUY') {
                 // LOGIKA DCA (Weighted Average)
                 $totalCostOld = $trade->price * $trade->quantity;
@@ -64,9 +78,8 @@ class SpotController extends Controller
                 $isSoldOut = $newQuantity <= 0.00000001;
                 $status = $isSoldOut ? 'SOLD' : 'OPEN';
                 
-                // 2. Hitung Realized PnL untuk transaksi INI SAJA
-                // Rumus: (Harga Jual - Harga Avg Entry) * Jumlah yang dijual - Fee
-                $pnlThisTransaction = (($request->price - $trade->price) * $request->quantity) - ($request->fee ?? 0);
+                // Gunakan pnlToStore (Gross) dikurangi Fee untuk update Induk (Net)
+                $pnlThisTransactionNet = ($pnlToStore ?? 0) - ($request->fee ?? 0);
 
                 // 3. Update Akumulasi PnL di Parent
                 $currentTotalPnL = $trade->pnl ?? 0;
@@ -78,8 +91,8 @@ class SpotController extends Controller
                 $trade->update([
                     'quantity' => max(0, $newQuantity),
                     'status' => $status,
-                    'pnl' => $newTotalPnL, // PnL Induk bertambah
-                    'sell_date' => $request->date, // Update tanggal aktivitas terakhir
+                    'pnl' => ($trade->pnl ?? 0) + $pnlThisTransactionNet, 
+                    'sell_date' => $request->date, 
                     'sell_time' => $request->time,
                 ]);
             }

@@ -345,7 +345,7 @@ class TradeLogController extends Controller
 
     /**
      * 6. Handle Transaction (DCA / Partial Sell)
-     * Menggantikan fungsi sellSpot lama dengan logika yang lebih canggih.
+     * [UPDATE] Menambahkan logika penyimpanan realized_pnl
      */
     public function storeTransaction(Request $request, $id)
     {
@@ -357,18 +357,36 @@ class TradeLogController extends Controller
             'date' => 'required|date',
             'time' => 'required',
             'screenshot' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:5120', 
+            'realized_pnl' => 'nullable|numeric', // [BARU] Izinkan field ini masuk
         ]);
 
         // 2. Handle Upload Gambar
         $screenshotPath = null;
         if ($request->hasFile('screenshot')) {
-            $request->validate(['screenshot' => 'image|mimes:jpeg,png,jpg,gif|max:5120']);
             $screenshotPath = $request->file('screenshot')->store('screenshots', 'public');
         }
 
         // 3. Gunakan DB Transaction agar aman
         DB::transaction(function () use ($request, $id, $screenshotPath) {
             
+            // Ambil data trade dulu untuk perhitungan backup (jika dari frontend null)
+            $trade = SpotTrade::findOrFail($id);
+
+            // [LOGIKA BARU] Tentukan nilai Realized PnL
+            $pnlToStore = null;
+            
+            if ($request->type === 'SELL') {
+                // Opsi 1: Ambil dari request Frontend (Vue)
+                if ($request->filled('realized_pnl')) {
+                    $pnlToStore = $request->realized_pnl;
+                } 
+                // Opsi 2: Hitung manual di Backend (Backup/Fallback)
+                else {
+                    // Rumus: (Harga Jual - Avg Price) * Qty
+                    $pnlToStore = ($request->price - $trade->price) * $request->quantity;
+                }
+            }
+
             // A. Simpan Riwayat di Tabel Anak (spot_transactions)
             SpotTransaction::create([
                 'spot_trade_id' => $id,
@@ -376,6 +394,8 @@ class TradeLogController extends Controller
                 'price' => $request->price,
                 'quantity' => $request->quantity,
                 'fee' => $request->fee ?? 0,
+                // [FIX] Masukkan PnL ke database
+                'realized_pnl' => $pnlToStore, 
                 'transaction_date' => $request->date,
                 'transaction_time' => $request->time,
                 'notes' => $request->notes,
@@ -383,25 +403,21 @@ class TradeLogController extends Controller
             ]);
 
             // B. Update Data Induk (spot_trades)
-            $trade = SpotTrade::findOrFail($id);
-            
             if ($request->type === 'BUY') {
                 // --- LOGIKA DCA (Weighted Average) ---
                 $totalCostOld = $trade->price * $trade->quantity;
                 $totalCostNew = $request->price * $request->quantity;
                 $newQuantity = $trade->quantity + $request->quantity;
                 
-                // Hitung Harga Rata-rata Baru
                 if ($newQuantity > 0) {
                     $newAvgPrice = ($totalCostOld + $totalCostNew) / $newQuantity;
                     
                     $trade->update([
-                        'price' => $newAvgPrice, // Update avg price (HANYA SAAT BUY/DCA)
+                        'price' => $newAvgPrice, 
                         'quantity' => $newQuantity 
                     ]);
                 }
 
-                // Kurangi Saldo Akun (Cost + Fee)
                 $account = TradingAccount::find($trade->trading_account_id);
                 $costDCA = ($request->price * $request->quantity) + ($request->fee ?? 0);
                 if ($account) {
@@ -410,22 +426,25 @@ class TradeLogController extends Controller
 
             } else {
                 // --- LOGIKA PARTIAL SELL ---
-                // Sisa holding tetap pakai avg price yang sama (PRICE TIDAK DI UPDATE DI SINI)
-                
                 $newQuantity = $trade->quantity - $request->quantity;
+                // Toleransi floating point untuk menentukan SOLD
                 $status = $newQuantity <= 0.00000001 ? 'SOLD' : 'OPEN';
                 
-                // Hitung Realized PnL (Cost Basis yang terealisasi)
+                // Hitung Net PnL (Untuk update saldo & akumulasi trade induk)
+                // Net PnL = Gross PnL - Fee
+                // Gunakan $pnlToStore yang sudah kita dapatkan di atas
+                $grossPnl = $pnlToStore ?? 0;
+                $netPnl = $grossPnl - ($request->fee ?? 0);
+
+                // Revenue (Uang yang diterima masuk dompet)
                 $revenue = $request->price * $request->quantity;
-                $cost = $trade->price * $request->quantity; // Menggunakan Avg Price saat ini
-                $pnlThisTransaction = $revenue - $cost - ($request->fee ?? 0);
 
                 // Update DB Induk
                 $trade->update([
-                    'quantity' => max(0, $newQuantity), // Hanya kurangi quantity
+                    'quantity' => max(0, $newQuantity), 
                     'status' => $status,
-                    'pnl' => ($trade->pnl ?? 0) + $pnlThisTransaction, // Update total PnL
-                    'sell_date' => $request->date, // Update last activity
+                    'pnl' => ($trade->pnl ?? 0) + $netPnl, // Update total Net PnL Induk
+                    'sell_date' => $request->date, 
                     'sell_time' => $request->time,
                 ]);
 

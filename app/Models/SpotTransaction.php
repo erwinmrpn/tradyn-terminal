@@ -16,6 +16,7 @@ class SpotTransaction extends Model
         'price',
         'quantity',
         'fee',
+        'realized_pnl',
         'transaction_date',
         'transaction_time',
         'notes',
