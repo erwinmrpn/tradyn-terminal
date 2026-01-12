@@ -11,13 +11,14 @@ const props = defineProps<{
     totalBalance: number;
     activePositions: number;
     metrics: any;
-    charts: any; 
+    charts: any; // Data chart dinamis dari controller
     recentTrades: any[];
 }>();
 
 // --- STATE ---
 const isSidebarCollapsed = ref(false);
 const selectedTimeframe = ref<'TODAY' | 'WEEK' | 'MONTH'>('TODAY');
+const isChartInteractive = ref(false); // [BARU] Default: Chart tidak menangkap scroll
 
 // --- COMPUTED: Data Metrics ---
 const currentMetrics = computed(() => props.metrics[selectedTimeframe.value]);
@@ -50,16 +51,21 @@ const chartSeriesComposite = computed(() => [
     { name: 'Trend', type: 'line', data: safeChartSeries.value }
 ]);
 
-// --- CHART OPTIONS (UPDATED: ZOOM + CLEANER AXIS) ---
+// --- CHART OPTIONS ---
 const chartOptions = computed(() => ({
     chart: {
         type: 'line',
         height: 350,
-        // [UPDATE] Aktifkan Toolbar untuk Zoom In/Out
+        // [SOLUSI] Zoom/Pan hanya aktif jika isChartInteractive = true
+        zoom: {
+            enabled: isChartInteractive.value, 
+            type: 'x', 
+            autoScaleYaxis: true
+        },
         toolbar: { 
-            show: true,
+            show: isChartInteractive.value, // Toolbar sembunyi jika mode interaksi mati
             tools: {
-                download: false, // Hilangkan tombol download agar bersih
+                download: false,
                 selection: true,
                 zoom: true,
                 zoomin: true,
@@ -67,28 +73,16 @@ const chartOptions = computed(() => ({
                 pan: true,
                 reset: true
             },
-            autoSelected: 'zoom' 
-        },
-        zoom: {
-            enabled: true,
-            type: 'x', 
-            autoScaleYaxis: true
+            autoSelected: 'pan' 
         },
         fontFamily: 'inherit',
         background: 'transparent',
-        // [UPDATE] Haluskan Animasi
         animations: { 
             enabled: true,
             easing: 'easeinout',
             speed: 800,
-            animateGradually: {
-                enabled: true,
-                delay: 150
-            },
-            dynamicAnimation: {
-                enabled: true,
-                speed: 350
-            }
+            animateGradually: { enabled: true, delay: 150 },
+            dynamicAnimation: { enabled: true, speed: 350 }
         }
     },
     colors: [
@@ -97,20 +91,15 @@ const chartOptions = computed(() => ({
     ],
     stroke: { width: [0, 3], curve: 'smooth' },
     plotOptions: { 
-        bar: { 
-            borderRadius: 2, 
-            columnWidth: '50%' 
-        } 
+        bar: { borderRadius: 2, columnWidth: '50%' } 
     },
     dataLabels: { enabled: false },
     
-    // [UPDATE] X-AXIS LEBIH RAPI
     xaxis: {
         type: 'datetime',
         categories: safeChartCategories.value,
         axisBorder: { show: false },
         axisTicks: { show: false },
-        // Batasi jumlah label agar tidak menumpuk/berantakan
         tickAmount: 6, 
         labels: {
             style: { colors: '#6B7280', fontSize: '10px' },
@@ -126,16 +115,10 @@ const chartOptions = computed(() => ({
     yaxis: {
         labels: { style: { colors: '#9CA3AF' }, formatter: (val: number) => formatCurrencyShort(val) }
     },
-    // [UPDATE] Grid Padding agar label bawah/atas tidak kepotong
     grid: { 
         borderColor: '#1f2128', 
         strokeDashArray: 4,
-        padding: {
-            top: 0,
-            right: 20,
-            bottom: 10, // Tambah jarak bawah
-            left: 10
-        }
+        padding: { top: 0, right: 20, bottom: 10, left: 10 }
     },
     tooltip: {
         theme: 'dark',
@@ -289,7 +272,21 @@ const formatDate = (dateString: string) => {
                                 <svg class="w-4 h-4 text-[#8c52ff]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
                                 Net PnL Analysis ({{ selectedTimeframe }})
                             </h3>
+                            
+                            <button 
+                                @click="isChartInteractive = !isChartInteractive"
+                                class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border"
+                                :class="isChartInteractive 
+                                    ? 'bg-[#8c52ff] text-white border-[#8c52ff] shadow-[0_0_10px_rgba(140,82,255,0.4)]' 
+                                    : 'bg-[#1a1b20] text-gray-400 border-[#2d2f36] hover:text-white'"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+                                </svg>
+                                {{ isChartInteractive ? 'Interactive: ON' : 'Enable Pan/Zoom' }}
+                            </button>
                         </div>
+                        
                         <div class="w-full h-[300px]">
                             <VueApexCharts v-if="safeChartSeries.length > 0" type="line" height="100%" :options="chartOptions" :series="chartSeriesComposite" />
                             <div v-else class="h-full flex items-center justify-center text-gray-600 text-xs">
