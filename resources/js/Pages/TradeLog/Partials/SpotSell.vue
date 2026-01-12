@@ -94,7 +94,9 @@ const form = useForm({
     price: '',     
     quantity: '',  
     total_usd: '', 
-    fee: 0, 
+    fee: 0,
+    // [UPDATE 1] Tambahkan field ini agar controller menerimanya
+    realized_pnl: null as number | null, 
     notes: '',
     screenshot: null as File | null,
 });
@@ -117,7 +119,6 @@ watch(sellPercentage, (newPercent) => {
 watch([transactionType, expandedFormId], () => {
     sellPercentage.value = 0;
 });
-
 
 watch(() => [form.price, form.quantity], () => {
     if (inputMode.value === 'COIN') {
@@ -162,6 +163,7 @@ const calculationPreview = computed(() => {
     } else {
         const revenue = newPrice * newQty;
         const cost = currentAvg * newQty;
+        // Ini hanya preview visual
         const pnl = revenue - cost - parseNumber(form.fee); 
         return { 
             type: 'SELL',
@@ -198,6 +200,7 @@ const switchMode = (mode: 'BUY' | 'SELL') => {
     form.type = mode;
     form.quantity = '';
     form.total_usd = '';
+    form.realized_pnl = null; // Reset PnL
     if (mode === 'SELL' && activeTradeData.value) {
          form.price = String(getEntryPrice(activeTradeData.value));
     }
@@ -216,8 +219,26 @@ const handleFileChange = async (event: Event) => {
     }
 };
 
+// [UPDATE PENTING: Kalkulasi PnL sebelum Submit]
 const submitTransaction = () => {
     if (!expandedFormId.value || isCompressing.value) return;
+
+    // Hitung PnL secara manual jika tipe transaksi adalah SELL
+    if (transactionType.value === 'SELL' && activeTradeData.value) {
+        const sellPrice = parseNumber(form.price);
+        const quantity = parseNumber(form.quantity);
+        // Ambil harga beli rata-rata saat ini
+        const avgEntryPrice = parseNumber(getEntryPrice(activeTradeData.value));
+        
+        // Rumus PnL Kotor: (Harga Jual - Harga Beli) * Jumlah
+        // Fee biarkan terpisah (biar Dashboard yang kurangi sendiri)
+        const grossPnL = (sellPrice - avgEntryPrice) * quantity;
+        
+        form.realized_pnl = parseFloat(grossPnL.toFixed(2));
+    } else {
+        form.realized_pnl = null; // BUY tidak punya Realized PnL
+    }
+
     form.post(route('trade.log.transaction.spot', expandedFormId.value), {
         forceFormData: true,
         preserveScroll: true,

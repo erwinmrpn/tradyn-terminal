@@ -7,7 +7,7 @@ const props = defineProps<{
 }>();
 
 // --- STATE ---
-// [UPDATE] Default ke 'ALL'
+// Default ke 'ALL'
 const timeFrame = ref<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>('ALL');
 const expandedCards = ref<Set<number>>(new Set());
 
@@ -114,10 +114,14 @@ const calculateMetrics = (trades: any[]) => {
 
     trades.forEach(t => {
         const pnl = parseFloat(t.pnl || 0);
-        netPnL += pnl;
+        const fee = parseFloat(t.fee || 0);
+        
+        // Net PnL dikurangi Fee
+        const realNetPnL = pnl - fee;
+        netPnL += realNetPnL;
+        
         if (pnl > 0) wins++;
 
-        const fee = parseFloat(t.fee || 0);
         totalFee += fee;
 
         // Margin digunakan sebagai cost basis di Futures
@@ -167,20 +171,36 @@ const previousMetrics = computed(() => calculateMetrics(previousTrades.value));
 
 // --- FORMATTERS ---
 const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+
+// [UPDATE] Adaptive Duration Formatter (Cleaner 0s logic)
 const formatDurationSmart = (ms: number) => {
     if (!ms || ms <= 0) return '-';
+    
+    const seconds = Math.floor((ms / 1000) % 60);
+    const minutes = Math.floor((ms / (1000 * 60)) % 60);
+    const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-    if (days > 30) return Math.floor(days/30) + ' Mo';
-    if (days > 0) return days + ' d';
-    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return hours + ' h';
+
+    // Jika lebih dari 1 hari: Tampilkan Hari, Jam, Menit
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    
+    // Jika lebih dari 1 jam: Tampilkan Jam, Menit
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    
+    // Jika lebih dari 1 menit: Tampilkan Menit. Detik hanya ditampilkan jika > 0.
+    if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    
+    // Jika hanya detik
+    return `${seconds}s`;
 };
+
 const getTradeDuration = (trade: any) => {
     const start = getDateTime(trade.entry_date, trade.entry_time);
     const end = getDateTime(trade.exit_date, trade.exit_time);
     if (!start || !end) return '-';
     return formatDurationSmart(end.getTime() - start.getTime());
 };
+
 const getRR = (trade: any) => {
     if (!trade.sl_price || !trade.entry_price || !trade.pnl) return '-';
     const risk = Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.sl_price)) * parseFloat(trade.quantity);
@@ -188,6 +208,7 @@ const getRR = (trade: any) => {
     const r = parseFloat(trade.pnl) / risk;
     return `1 : ${r.toFixed(1)}`;
 };
+
 const getComparisonLabel = () => {
     if (timeFrame.value === 'TODAY') return 'vs Yest.';
     if (timeFrame.value === 'WEEK') return 'vs Last Wk.';
@@ -223,7 +244,7 @@ const getComparisonLabel = () => {
             <div class="col-span-1 relative group p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
                 <div class="bg-[#121317] rounded-xl p-5 h-full relative overflow-hidden flex flex-col justify-between text-left">
                     <div class="flex justify-between items-start">
-                        <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Net PnL</div>
+                        <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider">Net PnL (After Fee)</div>
                         <div class="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
                             <svg class="w-12 h-12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
                         </div>
@@ -346,9 +367,9 @@ const getComparisonLabel = () => {
 
                             <div class="grid grid-cols-2 gap-4 mb-2">
                                 <div>
-                                    <div class="text-[10px] text-gray-500 uppercase font-bold">Net PnL</div>
-                                    <div class="text-2xl font-black tracking-tight" :class="Number(trade.pnl) > 0 ? 'text-green-400' : 'text-red-500'">
-                                        {{ Number(trade.pnl) > 0 ? '+' : '' }}{{ formatCurrency(trade.pnl) }}
+                                    <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Net PnL (After Fee)</div>
+                                    <div class="text-2xl font-black tracking-tight" :class="(parseFloat(trade.pnl) - parseFloat(trade.fee || 0)) > 0 ? 'text-green-400' : 'text-red-500'">
+                                        {{ (parseFloat(trade.pnl) - parseFloat(trade.fee || 0)) > 0 ? '+' : '' }}{{ formatCurrency(parseFloat(trade.pnl) - parseFloat(trade.fee || 0)) }}
                                     </div>
                                 </div>
                                 <div class="text-right">

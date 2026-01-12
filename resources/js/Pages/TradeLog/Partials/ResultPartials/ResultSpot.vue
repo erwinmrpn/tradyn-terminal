@@ -25,34 +25,42 @@ const getStartOfDay = (date: Date) => { const d = new Date(date); d.setHours(0, 
 const getStartOfWeek = (date: Date) => { const d = new Date(date); const day = d.getDay() || 7; if (day !== 1) d.setHours(-24 * (day - 1)); d.setHours(0, 0, 0, 0); return d; };
 const getStartOfMonth = (date: Date) => { const d = new Date(date); d.setDate(1); d.setHours(0, 0, 0, 0); return d; };
 
-// --- HELPER: HOLDING PERIOD (DURATION) ---
+// --- HELPERS: FORMATTERS ---
+const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+
+// [UPDATE] Format Durasi Lebih Pintar (Hide 0s)
+const formatDurationSmart = (ms: number) => {
+    if (!ms || ms <= 0) return '-';
+    
+    const seconds = Math.floor((ms / 1000) % 60);
+    const minutes = Math.floor((ms / (1000 * 60)) % 60);
+    const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+
+    // > 1 Hari: Tampilkan Hari, Jam, Menit
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    
+    // > 1 Jam: Tampilkan Jam, Menit
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    
+    // > 1 Menit: Tampilkan Menit. Detik hanya jika > 0
+    if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    
+    // Hanya Detik
+    return `${seconds}s`;
+};
+
 const getHoldingPeriod = (trade: any) => {
     if (!trade.buy_date || !trade.buy_time || !trade.sell_date || !trade.sell_time) return '-';
     
     const start = new Date(trade.buy_date + 'T' + trade.buy_time);
     const end = new Date(trade.sell_date + 'T' + trade.sell_time);
     
-    let diffMs = end.getTime() - start.getTime();
-    if (diffMs < 0) return '-';
-
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    diffMs -= days * (1000 * 60 * 60 * 24);
-    
-    const hours = Math.floor(diffMs / (1000 * 60 * 60));
-    diffMs -= hours * (1000 * 60 * 60);
-    
-    const minutes = Math.floor(diffMs / (1000 * 60));
-
-    const parts = [];
-    if (days > 0) parts.push(`${days}d`);
-    if (hours > 0) parts.push(`${hours}h`);
-    if (minutes > 0) parts.push(`${minutes}m`);
-    
-    if (parts.length === 0) return '< 1m';
-    return parts.join(' ');
+    const diffMs = end.getTime() - start.getTime();
+    return formatDurationSmart(diffMs);
 };
 
-// --- HELPER: HOLDING STATUS (Short/Medium/Long) ---
+// --- HELPER: HOLDING STATUS ---
 const getHoldingStatus = (trade: any) => {
     if (!trade.buy_date || !trade.buy_time || !trade.sell_date || !trade.sell_time) return { label: '-', class: 'text-gray-500' };
     
@@ -63,6 +71,15 @@ const getHoldingStatus = (trade: any) => {
     if (diffDays <= 7) return { label: 'Short Term', class: 'text-blue-400 bg-blue-400/10 border-blue-400/20' };
     if (diffDays <= 30) return { label: 'Medium Term', class: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' };
     return { label: 'Long Term', class: 'text-purple-400 bg-purple-400/10 border-purple-400/20' };
+};
+
+// --- HELPERS: FEE CALCULATOR (PER TRADE) ---
+const getTradeTotalFee = (trade: any) => {
+    let f = parseFloat(trade.fee || 0);
+    if (trade.transactions && Array.isArray(trade.transactions)) {
+        f += trade.transactions.reduce((acc: number, cur: any) => acc + parseFloat(cur.fee || 0), 0);
+    }
+    return f;
 };
 
 // --- HELPERS: UI ---
@@ -110,11 +127,7 @@ const filterTradesByPeriod = (allTrades: any[], period: string, offset: number =
 
     // [UPDATE] Logika untuk ALL Time Frame
     if (period === 'ALL') {
-        // Jika offset > 0 (artinya minta data 'previous'), return array kosong
-        // Karena 'All Time' tidak punya pembanding masa lalu
-        if (offset > 0) return [];
-        
-        // Return semua trade, di-sort
+        if (offset > 0) return []; 
         return [...allTrades].sort((a, b) => {
             const timeA = new Date(a.sell_date + 'T' + (a.sell_time || '00:00')).getTime();
             const timeB = new Date(b.sell_date + 'T' + (b.sell_time || '00:00')).getTime();
@@ -170,17 +183,17 @@ const calculateMetrics = (trades: any[]) => {
 
     trades.forEach(t => {
         const pnl = parseFloat(t.pnl || 0);
-        netPnL += pnl;
-        if (pnl > 0) wins++;
-
-        let tradeFee = parseFloat(t.fee || 0);
-        if (t.transactions && Array.isArray(t.transactions)) {
-            t.transactions.forEach((tx: any) => {
-                tradeFee += parseFloat(tx.fee || 0);
-            });
-        }
+        
+        // Hitung Total Fee
+        const tradeFee = getTradeTotalFee(t);
         totalFee += tradeFee;
 
+        // [UPDATE] Net PnL = Gross PnL - Total Fee
+        netPnL += (pnl - tradeFee);
+
+        if (pnl > 0) wins++;
+
+        // Hitung Modal (Invested) untuk ROI
         let revenue = 0;
         if (t.transactions && Array.isArray(t.transactions)) {
             t.transactions.forEach((tx: any) => {
@@ -189,8 +202,11 @@ const calculateMetrics = (trades: any[]) => {
                 }
             });
         }
-        if (revenue === 0) revenue = parseFloat(t.price) * parseFloat(t.quantity);
+        if (revenue === 0 && t.price && t.quantity) {
+            revenue = parseFloat(t.price) * parseFloat(t.quantity);
+        }
 
+        // Cost Basis estimasi: Revenue - Profit - Fee
         const costBasis = revenue - pnl - tradeFee;
         totalInvested += (costBasis > 0 ? costBasis : 0);
 
@@ -222,16 +238,6 @@ const previousTrades = computed(() => filterTradesByPeriod(props.trades, timeFra
 const currentMetrics = computed(() => calculateMetrics(currentTrades.value));
 const previousMetrics = computed(() => calculateMetrics(previousTrades.value));
 
-// --- FORMATTERS ---
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-const formatDurationSmart = (ms: number) => {
-    if (!ms || ms <= 0) return '-';
-    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-    if (days > 30) return Math.floor(days/30) + ' Mo';
-    if (days > 0) return days + ' d';
-    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return hours + ' h';
-};
 const getComparisonLabel = () => {
     if (timeFrame.value === 'TODAY') return 'vs Yest.';
     if (timeFrame.value === 'WEEK') return 'vs Last Wk.';
@@ -263,7 +269,7 @@ const getComparisonLabel = () => {
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-stretch">
             <div class="col-span-1 relative group p-[1px] rounded-xl bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] shadow-lg">
                 <div class="bg-[#121317] rounded-xl p-5 h-full relative overflow-hidden flex flex-col justify-between text-left">
-                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Net PnL</div>
+                    <div class="text-[9px] text-gray-500 font-bold uppercase tracking-wider mb-1">Net PnL (After Fee)</div>
                     <div class="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
                         <svg class="w-12 h-12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
                     </div>
@@ -365,7 +371,6 @@ const getComparisonLabel = () => {
                                         <span>{{ trade.trading_account?.name }}</span>
                                     </div>
                                 </div>
-                                
                                 <div class="text-right flex flex-col items-end">
                                     <div class="text-xs text-gray-300 font-mono">{{ trade.sell_date }}</div>
                                     <div class="text-[10px] text-blue-400 mt-1 font-bold">
@@ -380,23 +385,23 @@ const getComparisonLabel = () => {
 
                             <div class="flex justify-between items-end border-t border-[#2d2f36] pt-3">
                                  <div class="flex flex-col">
-                                    <span class="text-[9px] text-gray-500 uppercase font-bold">Total PnL</span>
-                                    <span class="font-bold font-mono text-lg" :class="parseFloat(trade.pnl) > 0 ? 'text-green-400' : 'text-red-500'">
-                                        {{ parseFloat(trade.pnl) > 0 ? '+' : '' }}{{ formatCurrency(trade.pnl) }}
+                                    <span class="text-[9px] text-gray-500 uppercase font-bold">Net PnL (After Fee)</span>
+                                    <span class="font-bold font-mono text-lg" 
+                                          :class="(parseFloat(trade.pnl) - getTradeTotalFee(trade)) > 0 ? 'text-green-400' : 'text-red-500'">
+                                        {{ (parseFloat(trade.pnl) - getTradeTotalFee(trade)) > 0 ? '+' : '' }}{{ formatCurrency(parseFloat(trade.pnl) - getTradeTotalFee(trade)) }}
                                     </span>
                                  </div>
                                  <div class="flex flex-col items-end">
                                     <span class="text-[9px] text-gray-500 uppercase font-bold">Fee</span>
                                     <span class="font-mono text-xs text-gray-300">
-                                        {{ formatCurrency(
-                                            parseFloat(trade.fee || 0) + 
-                                            (trade.transactions ? trade.transactions.reduce((sum:number, t:any) => sum + parseFloat(t.fee || 0), 0) : 0)
-                                        ) }}
+                                        {{ formatCurrency(getTradeTotalFee(trade)) }}
                                     </span>
                                  </div>
                             </div>
 
-                        </div> <div v-show="expandedCards.has(trade.id)" class="bg-[#0a0b0d] p-5 border-t border-[#2d2f36] space-y-4 animate-fade-in-down">
+                        </div>
+
+                        <div v-show="expandedCards.has(trade.id)" class="bg-[#0a0b0d] p-5 border-t border-[#2d2f36] space-y-4 animate-fade-in-down">
                             
                             <div v-if="trade.buy_notes" class="space-y-1">
                                 <div class="text-[9px] text-blue-500 uppercase font-bold">Entry Notes</div>
@@ -519,8 +524,7 @@ const getComparisonLabel = () => {
 
 <style scoped>
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-.animate-fade-in-down { animation: fadeInDown 0.4s ease-out forwards; }
-
+.animate-fade-in-down { animation: fadeInDown 0.3s ease-out forwards; }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
 </style>
