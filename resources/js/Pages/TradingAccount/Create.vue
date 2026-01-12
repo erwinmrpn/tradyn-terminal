@@ -47,7 +47,7 @@ const submit = () => {
         <div class="w-full max-w-lg">
             <div class="text-center mb-10">
                 <img src="/images/logo.png" class="w-12 h-12 mx-auto mb-4 rounded" alt="Logo" />
-                <h1 class="text-2xl font-bold text-white mb-2">Welcome to Tradyn</h1>
+                <h1 class="text-2xl font-bold text-white mb-2">Welcome to Tradyn Terminal</h1>
                 <p class="text-gray-500 text-sm">Create your first portfolio to start journaling.</p>
             </div>
             
