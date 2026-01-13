@@ -14,13 +14,9 @@ class TradingAccountController extends Controller
      */
     public function create()
     {
-        // Cek apakah user sudah memiliki minimal 1 akun trading
         $hasAccount = Auth::user()->tradingAccounts()->exists();
 
         return Inertia::render('TradingAccount/Create', [
-            // Kirim status ke frontend: 
-            // Jika false (belum punya akun) -> Tampilkan Fullscreen Setup
-            // Jika true (sudah punya) -> Tampilkan Dashboard Layout
             'isInitialSetup' => !$hasAccount 
         ]);
     }
@@ -30,28 +26,26 @@ class TradingAccountController extends Controller
      */
     public function store(Request $request)
     {
-        // 1. Validasi Input
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'currency' => 'required|string|max:5',
             'balance' => 'required|numeric|min:0',
             'market_type' => 'required|string|in:Crypto,Stock,Commodity',
             'exchange' => 'required|string|max:255',
-            'strategy_type' => 'required|string|max:50', // SPOT, FUTURES
+            'strategy_type' => 'required|string|max:50',
         ]);
 
-        // 2. Simpan ke Database
         $request->user()->tradingAccounts()->create([
             'name' => $validated['name'],
-            'market_type' => $validated['market_type'], // <--- Simpan data
+            'market_type' => $validated['market_type'],
             'currency' => $validated['currency'],
             'balance' => $validated['balance'],
             'exchange' => $validated['exchange'],
             'strategy_type' => $validated['strategy_type'],
         ]);
 
-        // 3. Redirect ke Dashboard setelah buat akun
-        return redirect()->route('dashboard')->with('success', 'Account created!');
+        // UBAH DISINI: Redirect ke Portfolio setelah buat akun
+        return redirect()->route('portfolio')->with('success', 'Account created!');
     }
 
     /**
@@ -64,16 +58,19 @@ class TradingAccountController extends Controller
     }
 
     /**
-     * (Opsional) Edit Akun.
+     * Edit Akun.
      */
     public function edit(TradingAccount $tradingAccount)
     {
         if ($tradingAccount->user_id !== Auth::id()) abort(403);
-        return Inertia::render('TradingAccount/Edit', ['account' => $tradingAccount]);
+        
+        // PERBAIKAN PENTING: 
+        // Arahkan ke 'Portfolio/Edit' karena file Edit.vue Anda ada di folder Portfolio
+        return Inertia::render('Portfolio/Edit', ['account' => $tradingAccount]);
     }
 
     /**
-     * (Opsional) Update Akun.
+     * Update Akun.
      */
     public function update(Request $request, TradingAccount $tradingAccount)
     {
@@ -81,21 +78,29 @@ class TradingAccountController extends Controller
         
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'market_type' => 'required|string|in:Crypto,Stock,Commodity',
             'exchange' => 'required|string|max:255',
+            'strategy_type' => 'required|string|max:50',
+            'currency' => 'required|string|max:5',
             'balance' => 'required|numeric|min:0',
         ]);
 
         $tradingAccount->update($validated);
-        return redirect()->route('dashboard')->with('success', 'Account updated!');
+        
+        // Redirect ke halaman Portfolio agar user melihat perubahannya
+        return redirect()->route('portfolio')->with('success', 'Account updated successfully!');
     }
 
     /**
-     * (Opsional) Hapus Akun.
+     * Hapus Akun.
      */
     public function destroy(TradingAccount $tradingAccount)
     {
         if ($tradingAccount->user_id !== Auth::id()) abort(403);
-        $tradingAccount->delete();
-        return redirect()->route('dashboard')->with('success', 'Account deleted.');
+        
+        $tradingAccount->delete(); // Ini menghapus data spesifik, bukan semua data.
+        
+        // PERBAIKAN PENTING: Redirect ke route 'portfolio', bukan 'dashboard'
+        return redirect()->route('portfolio')->with('success', 'Account deleted.');
     }
 }

@@ -43,7 +43,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/setup-account', [TradingAccountController::class, 'store'])->name('trading-account.store');
     
     // (Opsional) Route resource untuk edit/delete akun kedepannya
-    Route::resource('trading-accounts', TradingAccountController::class)->except(['create', 'store', 'show']);
+    Route::get('/trading-account/{tradingAccount}/edit', [TradingAccountController::class, 'edit'])->name('trading-account.edit');
+    Route::put('/trading-account/{tradingAccount}', [TradingAccountController::class, 'update'])->name('trading-account.update');
+    Route::delete('/trading-account/{tradingAccount}', [TradingAccountController::class, 'destroy'])->name('trading-account.destroy');
 
     // 5. Trade Calendar
     Route::get('/trade-calendar', function () { 

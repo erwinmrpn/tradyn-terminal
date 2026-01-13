@@ -13,14 +13,15 @@ class PortfolioController extends Controller
     {
         $userId = Auth::id();
 
-        // Ambil data akun beserta history trade barunya (spot & futures)
-        // Kita gunakan 'with' untuk eager loading agar performa cepat
+        // Ambil data akun.
+        // Fungsi 'get()' otomatis mengambil kolom baru 'market_type' dari database.
+        // Kita tetap menggunakan 'with' untuk eager loading history trade agar performa cepat.
         $accounts = TradingAccount::where('user_id', $userId)
             ->with(['spotTrades', 'futuresTrades']) 
             ->latest()
             ->get();
 
-        // Hitung Total Balance Global
+        // Hitung Total Balance Global dari semua akun
         $totalBalance = $accounts->sum('balance');
 
         return Inertia::render('Portfolio/Index', [
