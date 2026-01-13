@@ -35,6 +35,7 @@ class TradingAccountController extends Controller
             'name' => 'required|string|max:255',
             'currency' => 'required|string|max:5',
             'balance' => 'required|numeric|min:0',
+            'market_type' => 'required|string|in:Crypto,Stock,Commodity',
             'exchange' => 'required|string|max:255',
             'strategy_type' => 'required|string|max:50', // SPOT, FUTURES
         ]);
@@ -42,6 +43,7 @@ class TradingAccountController extends Controller
         // 2. Simpan ke Database
         $request->user()->tradingAccounts()->create([
             'name' => $validated['name'],
+            'market_type' => $validated['market_type'], // <--- Simpan data
             'currency' => $validated['currency'],
             'balance' => $validated['balance'],
             'exchange' => $validated['exchange'],

@@ -10,7 +10,7 @@ const props = defineProps<{
     isInitialSetup: boolean;
 }>();
 
-// --- SIDEBAR LOGIC (Hanya dipakai jika bukan initial setup) ---
+// --- SIDEBAR LOGIC ---
 const isSidebarCollapsed = ref(false);
 
 onMounted(() => {
@@ -26,6 +26,7 @@ const toggleSidebar = () => {
 // --- FORM DATA ---
 const form = useForm({
     name: '',
+    market_type: 'Crypto', // Default value
     exchange: '',
     strategy_type: 'SPOT',
     balance: '',
@@ -33,7 +34,6 @@ const form = useForm({
 });
 
 const submit = () => {
-    // Tombol akan disable otomatis saat processing
     form.post(route('trading-account.store'), {
         onFinish: () => form.reset(),
     });
@@ -62,8 +62,18 @@ const submit = () => {
                     </div>
 
                     <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Exchange / Wallet</label>
-                        <input v-model="form.exchange" type="text" placeholder="e.g. Binance, Bybit, Metamask" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600">
+                        <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Market Type</label>
+                        <select v-model="form.market_type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 outline-none">
+                            <option value="Crypto">Crypto</option>
+                            <option value="Stock">Stock</option>
+                            <option value="Commodity">Commodity</option>
+                        </select>
+                        <div v-if="form.errors.market_type" class="text-red-500 text-xs mt-1">{{ form.errors.market_type }}</div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Exchange, Wallet, Brokers</label>
+                        <input v-model="form.exchange" type="text" placeholder="e.g. Binance, Interactive Brokers, Metamask" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600">
                         <div v-if="form.errors.exchange" class="text-red-500 text-xs mt-1">{{ form.errors.exchange }}</div>
                     </div>
 
@@ -133,8 +143,18 @@ const submit = () => {
                             </div>
 
                             <div>
-                                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Exchange / Wallet</label>
-                                <input v-model="form.exchange" type="text" placeholder="e.g. Bybit, Binance" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600">
+                                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Market Type</label>
+                                <select v-model="form.market_type" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 outline-none">
+                                    <option value="Crypto">Crypto</option>
+                                    <option value="Stock">Stock</option>
+                                    <option value="Commodity">Commodity</option>
+                                </select>
+                                <div v-if="form.errors.market_type" class="text-red-500 text-xs mt-1">{{ form.errors.market_type }}</div>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 mb-2 uppercase">Exchange, Wallet, Brokers</label>
+                                <input v-model="form.exchange" type="text" placeholder="e.g. Bybit, Binance, Interactive Brokers" class="w-full bg-[#1a1b20] border border-[#2d2f36] text-white text-sm rounded-lg p-3 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder-gray-600">
                                 <div v-if="form.errors.exchange" class="text-red-500 text-xs mt-1">{{ form.errors.exchange }}</div>
                             </div>
 

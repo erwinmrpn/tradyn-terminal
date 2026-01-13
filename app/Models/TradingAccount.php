@@ -15,6 +15,7 @@ class TradingAccount extends Model
         'user_id',
         'name',
         'exchange',
+        'market_type',
         'strategy_type',
         'balance',
         'currency',
