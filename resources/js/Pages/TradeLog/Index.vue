@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import Sidebar from '@/Components/Sidebar.vue';
 import Navbar from '@/Components/Navbar.vue';
 import Footer from '@/Components/Footer.vue';
 import { ref, watch, onMounted, computed, nextTick } from 'vue';
 
-// --- IMPORT KOMPONEN ANAK ---
+// --- IMPORT CHILD COMPONENTS ---
 import SpotBuy from './Partials/SpotBuy.vue';
 import SpotSell from './Partials/SpotSell.vue';
 import FuturesOpen from './Partials/FuturesOpen.vue';
@@ -33,7 +33,7 @@ const showImageModal = ref(false);
 const selectedImageUrl = ref('');
 const selectedImageName = ref('');
 
-// State untuk Expand/Collapse Draw Down History
+// State for Expand/Collapse Draw Down History
 const expandedHistoryRows = ref<Set<number>>(new Set());
 
 // --- ACTIONS MODAL ---
@@ -70,7 +70,7 @@ const downloadImage = () => {
     document.body.removeChild(link);
 };
 
-// Fungsi Toggle Draw Down
+// Function Toggle Draw Down
 const toggleHistoryRow = (id: number) => {
     if (expandedHistoryRows.value.has(id)) {
         expandedHistoryRows.value.delete(id);
@@ -79,7 +79,7 @@ const toggleHistoryRow = (id: number) => {
     }
 };
 
-// --- LOGIC UTAMA ---
+// --- MAIN LOGIC ---
 const selectedAccount = ref(props.selectedAccountId);
 const resultSubTab = ref<'SPOT' | 'FUTURES'>(props.currentResultTab || 'FUTURES');
 const futuresTab = ref<'OPEN' | 'CLOSE'>('OPEN');
@@ -96,15 +96,37 @@ const filteredAccounts = computed(() => {
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
+// [UPDATED] Computed property to calculate displayed balance based on selection
 const displayedBalance = computed(() => {
-    return props.totalBalance;
+    // 1. If a specific account is selected, return its balance
+    if (selectedAccount.value !== 'all') {
+        const account = props.accounts.find(acc => acc.id.toString() === selectedAccount.value.toString());
+        return account ? Number(account.balance) : 0;
+    }
+
+    // 2. If 'All Accounts' is selected, return aggregated balance based on active tab
+    if (props.activeType === 'SPOT') {
+        return props.spotBalance;
+    } else if (props.activeType === 'FUTURES') {
+        return props.futuresBalance;
+    } else {
+        return props.totalBalance;
+    }
 });
 
 const applySmartDefaults = () => {
+    // Only auto-select if "All Accounts" isn't explicitly chosen by user logic 
+    // or if current selection is invalid for the new tab.
+    // For now, let's keep 'all' as valid if the list isn't empty to allow seeing totals.
     if (filteredAccounts.value.length > 0) {
-        const firstAccountID = filteredAccounts.value[0].id;
         const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
-        if (selectedAccount.value === 'all' || !isCurrentSelectionValid) selectedAccount.value = firstAccountID;
+        
+        // If current selection is invalid for this tab, switch to 'all' or first account
+        if (selectedAccount.value !== 'all' && !isCurrentSelectionValid) {
+             selectedAccount.value = 'all'; 
+        }
+    } else {
+        selectedAccount.value = 'all';
     }
 };
 
@@ -120,11 +142,11 @@ watch(resultSubTab, (newVal) => {
 });
 
 watch(selectedAccount, (newAccount) => {
-    if (newAccount && newAccount !== props.selectedAccountId) {
-        let params: any = { type: props.activeType, account_id: newAccount };
-        if (props.activeType === 'RESULT') params.result_type = resultSubTab.value;
-        router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
-    }
+    let params: any = { type: props.activeType, account_id: newAccount };
+    if (props.activeType === 'RESULT') params.result_type = resultSubTab.value;
+    
+    // Use router to fetch filtered data, preserving state to keep tabs active
+    router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 });
 
 watch(() => props.activeType, () => {
@@ -147,6 +169,10 @@ const toggleSidebar = () => {
 const switchTab = (type: string) => {
     let params: any = { type: type, account_id: 'all' };
     if (type === 'RESULT') params.result_type = resultSubTab.value;
+    
+    // Reset selected account to 'all' when switching main tabs for better UX
+    selectedAccount.value = 'all'; 
+    
     router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 };
 
@@ -196,7 +222,7 @@ const getHoldingClass = (period: string) => {
                 <div class="flex flex-col sm:flex-row items-end justify-between gap-4 border-b border-[#1f2128] pb-4">
                     <div>
                         <div class="text-xs text-gray-500 uppercase font-semibold tracking-wider">
-                            Total {{ props.activeType === 'RESULT' ? resultSubTab : props.activeType }} Balance
+                            {{ selectedAccount === 'all' ? `Total ${props.activeType === 'RESULT' ? resultSubTab : props.activeType} Balance` : 'Account Balance' }}
                         </div>
                         <div class="text-3xl font-bold text-white mt-1">{{ formatCurrency(displayedBalance) }}</div>
                     </div>
