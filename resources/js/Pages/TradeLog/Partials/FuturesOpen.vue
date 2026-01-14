@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import imageCompression from 'browser-image-compression';
 
 const props = defineProps<{
@@ -16,12 +16,27 @@ const isCompressing = ref(false);
 const inputMode = ref<'ASSET' | 'TOTAL'>('ASSET'); 
 const dynamicInput = ref(''); 
 
+// 1. Ambil Market Type Unik dari akun yang tersedia
+const availableMarketTypes = computed(() => {
+    const types = new Set(props.accounts.map(acc => acc.market_type));
+    return types.size > 0 ? Array.from(types) : ['Crypto'];
+});
+
+// 2. Filter Akun berdasarkan Market Type yang dipilih
+const filteredAccounts = computed(() => {
+    return props.accounts.filter(acc => acc.market_type === form.market_type);
+});
+
 const form = useForm({
-    trading_account_id: props.accounts.length > 0 ? props.accounts[0].id : '',
+    // Default ID akan di-set di onMounted atau watcher
+    trading_account_id: '',
     date: new Date().toISOString().split('T')[0],
     time: getCurrentTime(),
     symbol: '',
-    market_type: 'CRYPTO',
+    
+    // Default Market Type sesuai data akun pertama
+    market_type: props.accounts.length > 0 ? props.accounts[0].market_type : 'Crypto',
+    
     type: 'LONG',
     leverage: 10,
     margin_mode: 'CROSS',
@@ -36,7 +51,24 @@ const form = useForm({
     form_type: 'FUTURES'
 });
 
-// [LOGIC] Kalkulasi Otomatis (Realtime)
+// Set default account ID saat komponen dimuat
+onMounted(() => {
+    if (filteredAccounts.value.length > 0) {
+        form.trading_account_id = filteredAccounts.value[0].id;
+    }
+});
+
+// Watcher: Saat Market Type berubah, auto-pilih akun pertama yang sesuai
+watch(() => form.market_type, (newType) => {
+    const firstAccount = props.accounts.find(acc => acc.market_type === newType);
+    if (firstAccount) {
+        form.trading_account_id = firstAccount.id;
+    } else {
+        form.trading_account_id = '';
+    }
+});
+
+// [LOGIC] Kalkulasi Otomatis (Realtime) - TETAP UTUH
 watch([() => form.price, dynamicInput, inputMode, () => form.leverage], ([newPrice, newVal, mode, newLev]) => {
     const price = parseFloat(String(newPrice)) || 0;
     const inputVal = parseFloat(String(newVal)) || 0;
@@ -115,9 +147,9 @@ const submit = () => {
                         <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Market</label>
                         <div class="relative">
                             <select v-model="form.market_type" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs font-bold rounded-lg h-[46px] px-2 focus:border-blue-500 outline-none cursor-pointer uppercase appearance-none">
-                                <option value="CRYPTO">Crypto</option>
-                                <option value="FOREX">Forex</option>
-                                <option value="STOCKS">Stocks</option>
+                                <option v-for="type in availableMarketTypes" :key="type" :value="type">
+                                    {{ type }}
+                                </option>
                             </select>
                             <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
                                 <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
@@ -208,7 +240,10 @@ const submit = () => {
                         <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Trading Account</label>
                         <div class="relative">
                             <select v-model="form.trading_account_id" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded-lg p-2.5 focus:border-blue-500 outline-none appearance-none">
-                                <option v-for="acc in props.accounts" :key="acc.id" :value="acc.id">{{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}</option>
+                                <option v-for="acc in filteredAccounts" :key="acc.id" :value="acc.id">
+                                    {{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}
+                                </option>
+                                <option v-if="filteredAccounts.length === 0" value="" disabled>No accounts for {{ form.market_type }}</option>
                             </select>
                             <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
                                 <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>

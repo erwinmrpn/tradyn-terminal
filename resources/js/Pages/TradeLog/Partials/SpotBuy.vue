@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import imageCompression from 'browser-image-compression';
 
+// Props: accounts data passed from parent/controller
 const props = defineProps<{ accounts: any[] }>();
 
 const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
@@ -11,24 +12,55 @@ const isCompressing = ref(false);
 const inputMode = ref<'ASSET' | 'TOTAL'>('TOTAL'); 
 const dynamicInput = ref('');
 
+// 1. Get Unique Market Types from available accounts for the Market Dropdown
+const availableMarketTypes = computed(() => {
+    // Extract unique market_types from accounts, default to ['CRYPTO'] if empty
+    const types = new Set(props.accounts.map(acc => acc.market_type));
+    return types.size > 0 ? Array.from(types) : ['Crypto'];
+});
+
+// 2. Filter Accounts based on selected Market Type
+const filteredAccounts = computed(() => {
+    return props.accounts.filter(acc => acc.market_type === form.market_type);
+});
+
 const form = useForm({
     form_type: 'SPOT',
-    trading_account_id: props.accounts.length > 0 ? props.accounts[0].id : '',
+    // Default account ID will be set in onMounted or watcher
+    trading_account_id: '', 
     date: new Date().toISOString().split('T')[0],
     time: getCurrentTime(),
     
     symbol: '',
-    market_type: 'CRYPTO',
+    // Default market type to the first available one or 'Crypto'
+    market_type: props.accounts.length > 0 ? props.accounts[0].market_type : 'Crypto',
     
     price: '',
     quantity: '',
     total: '',
-    fee: '', // Fee disimpan di sini
+    fee: '', 
     target_sell: '',
     target_buy: '',
     holding_period: 'Short Term',
     notes: '',
     screenshot: null as File | null,
+});
+
+// Initialize default account ID on mount
+onMounted(() => {
+    if (filteredAccounts.value.length > 0) {
+        form.trading_account_id = filteredAccounts.value[0].id;
+    }
+});
+
+// Watcher: When Market Type changes, auto-select the first available account in that market
+watch(() => form.market_type, (newType) => {
+    const firstAccount = props.accounts.find(acc => acc.market_type === newType);
+    if (firstAccount) {
+        form.trading_account_id = firstAccount.id;
+    } else {
+        form.trading_account_id = ''; // Reset if no account found
+    }
 });
 
 // Smart Input Logic (Price * Qty = Total)
@@ -133,10 +165,13 @@ const submit = () => {
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Market</label>
                             <div class="relative">
                                 <select v-model="form.market_type" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs font-bold rounded-lg h-[46px] px-2 focus:border-emerald-500 outline-none cursor-pointer uppercase appearance-none">
-                                    <option value="CRYPTO">Crypto</option>
-                                    <option value="FOREX">Forex</option>
-                                    <option value="STOCKS">Stocks</option>
+                                    <option v-for="type in availableMarketTypes" :key="type" :value="type">
+                                        {{ type }}
+                                    </option>
                                 </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                    <svg class="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                </div>
                             </div>
                         </div>
 
@@ -198,7 +233,10 @@ const submit = () => {
                             <label class="block text-[9px] text-gray-500 mb-1 font-bold uppercase tracking-wider">Account</label>
                             <div class="relative">
                                 <select v-model="form.trading_account_id" class="w-full bg-[#0a0b0d] border border-[#2d2f36] text-white text-xs rounded-lg p-2.5 focus:border-emerald-500 outline-none appearance-none" :class="{'border-red-500': form.errors.trading_account_id}">
-                                    <option v-for="acc in props.accounts" :key="acc.id" :value="acc.id">{{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}</option>
+                                    <option v-for="acc in filteredAccounts" :key="acc.id" :value="acc.id">
+                                        {{ acc.name }} ({{ acc.exchange }}) - ${{ acc.balance }}
+                                    </option>
+                                    <option v-if="filteredAccounts.length === 0" value="" disabled>No accounts for {{ form.market_type }}</option>
                                 </select>
                                 <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
                                     <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
