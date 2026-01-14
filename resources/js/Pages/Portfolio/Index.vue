@@ -46,12 +46,32 @@ const availableExchanges = computed(() => {
 
 watch(selectedMarket, () => selectedExchange.value = 'All');
 
+// 1. Logic Filter Akun (Sudah ada)
 const filteredAccounts = computed(() => {
     return props.accounts.filter(account => {
         const matchMarket = selectedMarket.value === 'All' || account.market_type === selectedMarket.value;
         const matchExchange = selectedExchange.value === 'All' || account.exchange === selectedExchange.value;
         return matchMarket && matchExchange;
     });
+});
+
+// 2. [BARU] Logic Menghitung Net Worth Berdasarkan Filter
+const filteredNetWorth = computed(() => {
+    // Menjumlahkan balance dari akun yang lolos filter
+    return filteredAccounts.value.reduce((total, account) => {
+        return total + Number(account.balance);
+    }, 0);
+});
+
+// 3. [BARU] Logic Label Dinamis (Opsional: Agar judul box berubah sesuai konteks)
+const netWorthLabel = computed(() => {
+    if (selectedExchange.value !== 'All') {
+        return `${selectedExchange.value} Balance`; // Contoh: "Binance Balance"
+    }
+    if (selectedMarket.value !== 'All') {
+        return `${selectedMarket.value} Net Worth`; // Contoh: "Crypto Net Worth"
+    }
+    return 'Net Worth'; // Default: "Net Worth"
 });
 
 // --- ACTIONS ---
@@ -111,8 +131,8 @@ const deleteAccount = () => {
 
                 <div class="relative bg-[#121317] border border-[#1f2128] rounded-xl p-8 text-center shadow-lg overflow-hidden">
                     <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6]"></div>
-                    <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Net Worth</p>
-                    <h2 class="text-4xl md:text-5xl font-black text-white tracking-tight">{{ formatCurrency(props.totalBalance) }}</h2>
+                    <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">{{ netWorthLabel }}</p>
+                    <h2 class="text-4xl md:text-5xl font-black text-white tracking-tight">{{ formatCurrency(filteredNetWorth) }}</h2>
                 </div>
 
                 <div class="flex flex-col md:flex-row gap-4 justify-between items-center bg-[#121317] border border-[#1f2128] p-2 rounded-xl relative z-10">
@@ -145,7 +165,6 @@ const deleteAccount = () => {
                         :key="account.id" 
                         class="relative bg-[#121317] border rounded-xl p-5 transition-all duration-300 group"
                         :class="[
-                            // Jika aktif: Z-Index 50 (Di atas overlay), Border ungu, Glow halus
                             activeDropdown === account.id 
                                 ? 'z-50 border-[#8c52ff] shadow-[0_0_15px_rgba(140,82,255,0.15)]' 
                                 : 'z-0 border-[#1f2128] hover:border-gray-600'
