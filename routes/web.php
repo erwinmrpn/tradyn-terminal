@@ -11,6 +11,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\TradeLogController;
 use App\Http\Controllers\SpotController;
+use App\Http\Controllers\TradeCalendarController;
 
 // --- PUBLIC ROUTES ---
 Route::get('/', function () {
@@ -48,9 +49,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/trading-account/{tradingAccount}', [TradingAccountController::class, 'destroy'])->name('trading-account.destroy');
 
     // 5. Trade Calendar
-    Route::get('/trade-calendar', function () { 
-        return Inertia::render('Dashboard'); 
-    })->name('trade.calendar'); 
+    Route::get('/trade-calendar', [TradeCalendarController::class, 'index'])->name('trade-calendar.index');
 
     // 6. Watchlist Assets
     Route::get('/watchlist', function () { 
@@ -85,6 +84,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 Route::post('/trade-log/transaction/spot/{id}', [TradeLogController::class, 'storeTransaction'])
     ->name('trade.log.transaction.spot')
     ->middleware(['auth', 'verified']);
+
 });
 
 require __DIR__.'/auth.php';
