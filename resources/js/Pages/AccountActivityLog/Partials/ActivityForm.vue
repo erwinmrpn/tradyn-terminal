@@ -61,11 +61,11 @@ const submit = () => {
 </script>
 
 <template>
-    <div class="relative bg-[#121317] border border-[#1f2128] rounded-xl shadow-lg mb-8 overflow-hidden flex flex-col md:flex-row group">
+    <div class="relative flex flex-col md:flex-row group overflow-hidden h-full">
         
         <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#8c52ff] to-[#5ce1e6] z-10"></div>
 
-        <div class="w-full md:w-[200px] p-6 flex flex-col justify-center relative bg-[#121317] shrink-0">
+        <div class="w-full md:w-[200px] p-6 flex flex-col justify-center relative bg-[#121317] shrink-0 border-b md:border-b-0 md:border-r border-[#1f2128]">
             
             <div v-if="selectedAccount" class="space-y-3">
                 <div class="flex flex-col gap-1">
