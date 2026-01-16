@@ -50,6 +50,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // 5. Trade Calendar
     Route::get('/trade-calendar', [TradeCalendarController::class, 'index'])->name('trade-calendar.index');
+    // BARU: Route untuk mengambil detail transaksi per tanggal
+    Route::get('/trade-calendar/details', [TradeCalendarController::class, 'getDetails'])->name('trade-calendar.details');
 
     // 6. Watchlist Assets
     Route::get('/watchlist', function () { 

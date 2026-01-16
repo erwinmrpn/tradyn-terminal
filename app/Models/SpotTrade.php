@@ -51,4 +51,13 @@ class SpotTrade extends Model
     {
         return $this->hasMany(SpotTransaction::class, 'spot_trade_id');
     }
+
+    /**
+     * Alias untuk transactions() agar sesuai dengan controller 'with(spotTransactions)'
+     * Ini mencegah error 500 saat controller memanggil relasi ini.
+     */
+    public function spotTransactions()
+    {
+        return $this->hasMany(SpotTransaction::class, 'spot_trade_id');
+    }
 }

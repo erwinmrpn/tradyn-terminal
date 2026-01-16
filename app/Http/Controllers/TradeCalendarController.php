@@ -4,11 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\FuturesTrade;
 use App\Models\SpotTransaction;
+use App\Models\SpotTrade;
 use App\Models\TradingAccount;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB; // Tambah Import DB
+use Illuminate\Support\Facades\DB;
 
 class TradeCalendarController extends Controller
 {
@@ -16,69 +17,121 @@ class TradeCalendarController extends Controller
     {
         $userId = auth()->id();
         
+        // Filter Inputs
         $selectedYear = $request->input('year', Carbon::now()->year);
         $accountId = $request->input('account_id', 'all');
-        $marketType = $request->input('market_type', 'all');
+        // Strategy Type = Spot / Futures
+        $strategyType = $request->input('strategy_type', 'all'); 
+        // Market Category = Crypto / Stock (sesuai kolom market_type di DB)
+        $marketCategory = $request->input('market_category', 'all'); 
 
         // 1. GET AVAILABLE YEARS
         $futuresYears = FuturesTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
             ->selectRaw('YEAR(exit_date) as year')->distinct();
-        $spotYears = SpotTransaction::whereHas('spotTrade.tradingAccount', fn($q) => $q->where('user_id', $userId))
-            ->selectRaw('YEAR(transaction_date) as year')->distinct();
-        $availableYears = $futuresYears->union($spotYears)->orderBy('year', 'desc')->pluck('year')->filter()->values()->all();
+        $spotYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->selectRaw('YEAR(sell_date) as year')->distinct();
+            
+        $availableYears = $futuresYears
+            ->union($spotBuyYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->selectRaw('YEAR(buy_date) as year')->distinct())
+            ->union($spotYears)
+            ->orderBy('year', 'desc')
+            ->pluck('year')
+            ->filter()
+            ->values()
+            ->all();
 
         if (empty($availableYears)) $availableYears = [Carbon::now()->year];
         if (!in_array($selectedYear, $availableYears) && count($availableYears) > 0) $selectedYear = $availableYears[0];
 
-        // 2. PREPARE DAILY DATA QUERY (Untuk dipakai di Monthly & Daily View)
-        // Kita ambil semua data harian untuk TAHUN terpilih agar frontend ringan (tidak perlu request ulang per bulan)
-        
+        // 2. GET AVAILABLE MARKET TYPES (Untuk Dropdown Filter: CRYPTO, STOCK, dll)
+        $availableMarketTypes = TradingAccount::where('user_id', $userId)
+            ->select('market_type')
+            ->distinct()
+            ->pluck('market_type')
+            ->all();
+
+        // 3. PREPARE DAILY DATA QUERY
         $dailyData = [];
 
-        // Query Futures Daily
-        if ($marketType === 'all' || $marketType === 'Futures') {
-            $q = FuturesTrade::where('status', 'CLOSED')
-                ->whereYear('exit_date', $selectedYear)
-                ->whereHas('tradingAccount', fn($sq) => $sq->where('user_id', $userId));
-            if ($accountId !== 'all') $q->where('trading_account_id', $accountId);
+        $addToDaily = function($date, $pnl) use (&$dailyData) {
+            if (!$date) return;
+            if (!isset($dailyData[$date])) {
+                $dailyData[$date] = ['trades' => 0, 'pnl' => 0];
+            }
+            $dailyData[$date]['trades'] += 1;
+            $dailyData[$date]['pnl'] += $pnl;
+        };
+
+        // --- A. FUTURES DATA ---
+        if ($strategyType === 'all' || $strategyType === 'Futures') {
+            $futuresQuery = FuturesTrade::whereHas('tradingAccount', function($sq) use ($userId, $marketCategory) {
+                $sq->where('user_id', $userId);
+                if ($marketCategory !== 'all') {
+                    $sq->where('market_type', $marketCategory);
+                }
+            })
+            ->where(function($q) use ($selectedYear) {
+                $q->whereYear('entry_date', $selectedYear)
+                  ->orWhereYear('exit_date', $selectedYear);
+            });
+
+            if ($accountId !== 'all') $futuresQuery->where('trading_account_id', $accountId);
             
-            $futuresDaily = $q->selectRaw('DATE(exit_date) as date, COUNT(*) as trades, SUM(pnl) as pnl')
-                ->groupBy('date')
-                ->get();
-            
-            foreach ($futuresDaily as $d) {
-                if (!isset($dailyData[$d->date])) $dailyData[$d->date] = ['trades' => 0, 'pnl' => 0];
-                $dailyData[$d->date]['trades'] += $d->trades;
-                $dailyData[$d->date]['pnl'] += $d->pnl;
+            $futuresTrades = $futuresQuery->get(['entry_date', 'exit_date', 'status', 'pnl']);
+
+            foreach ($futuresTrades as $trade) {
+                $entry = $trade->entry_date;
+                $exit = $trade->exit_date;
+                $isClosed = $trade->status === 'CLOSED';
+
+                if ($isClosed && $entry == $exit) {
+                    $addToDaily($exit, $trade->pnl);
+                } else {
+                    if ($entry && str_starts_with($entry, $selectedYear)) $addToDaily($entry, 0); 
+                    if ($isClosed && $exit && str_starts_with($exit, $selectedYear)) $addToDaily($exit, $trade->pnl);
+                }
             }
         }
 
-        // Query Spot Daily
-        if ($marketType === 'all' || $marketType === 'Spot') {
-            $q = SpotTransaction::where('type', 'SELL')
-                ->whereYear('transaction_date', $selectedYear)
-                ->whereHas('spotTrade.tradingAccount', fn($sq) => $sq->where('user_id', $userId));
-            if ($accountId !== 'all') $q->whereHas('spotTrade', fn($sq) => $sq->where('trading_account_id', $accountId));
+        // --- B. SPOT DATA ---
+        if ($strategyType === 'all' || $strategyType === 'Spot') {
+            $spotQuery = SpotTrade::whereHas('tradingAccount', function($sq) use ($userId, $marketCategory) {
+                $sq->where('user_id', $userId);
+                if ($marketCategory !== 'all') {
+                    $sq->where('market_type', $marketCategory);
+                }
+            })
+            ->where(function($q) use ($selectedYear) {
+                $q->whereYear('buy_date', $selectedYear)
+                  ->orWhereYear('sell_date', $selectedYear);
+            });
 
-            $spotDaily = $q->selectRaw('DATE(transaction_date) as date, COUNT(*) as trades, SUM(realized_pnl - fee) as pnl')
-                ->groupBy('date')
-                ->get();
+            if ($accountId !== 'all') $spotQuery->where('trading_account_id', $accountId);
 
-            foreach ($spotDaily as $d) {
-                if (!isset($dailyData[$d->date])) $dailyData[$d->date] = ['trades' => 0, 'pnl' => 0];
-                $dailyData[$d->date]['trades'] += $d->trades;
-                $dailyData[$d->date]['pnl'] += $d->pnl;
+            $spotTrades = $spotQuery->get(['buy_date', 'sell_date', 'status', 'pnl']);
+
+            foreach ($spotTrades as $trade) {
+                $buy = $trade->buy_date;
+                $sell = $trade->sell_date;
+                $isSold = !empty($sell);
+
+                if ($isSold && $buy == $sell) {
+                    $addToDaily($sell, $trade->pnl);
+                } else {
+                    if ($buy && str_starts_with($buy, $selectedYear)) $addToDaily($buy, 0);
+                    if ($isSold && $sell && str_starts_with($sell, $selectedYear)) $addToDaily($sell, $trade->pnl);
+                }
             }
         }
 
-        // 3. GENERATE MONTHLY OVERVIEW (Dari data harian yang sudah dihitung di atas, biar efisien)
+        // 4. GENERATE MONTHLY OVERVIEW
         $monthlyOverview = [];
         for ($month = 1; $month <= 12; $month++) {
             $datePrefix = $selectedYear . '-' . str_pad($month, 2, '0', STR_PAD_LEFT);
             $monthTrades = 0;
             $monthPnl = 0;
 
-            // Loop array dailyData untuk hitung total bulan ini
             foreach ($dailyData as $date => $data) {
                 if (str_starts_with($date, $datePrefix)) {
                     $monthTrades += $data['trades'];
@@ -102,11 +155,123 @@ class TradeCalendarController extends Controller
 
         return Inertia::render('TradeCalendar/Index', [
             'availableYears' => $availableYears,
+            'availableMarketTypes' => $availableMarketTypes,
             'selectedYear' => (int)$selectedYear,
             'monthlyOverview' => $monthlyOverview,
-            'dailyData' => $dailyData, // <--- INI KUNCI UTAMANYA (Data Harian dikirim ke Vue)
+            'dailyData' => $dailyData, 
             'accounts' => $accounts,
-            'filters' => ['account_id' => $accountId, 'market_type' => $marketType]
+            'filters' => [
+                'account_id' => $accountId, 
+                'strategy_type' => $strategyType,
+                'market_category' => $marketCategory
+            ]
         ]);
+    }
+
+    // --- METHOD GET DETAILS (FIXED MARKET VS STRATEGY) ---
+    public function getDetails(Request $request)
+    {
+        $userId = auth()->id();
+        $date = $request->input('date'); 
+        $accountId = $request->input('account_id', 'all');
+        $strategyType = $request->input('strategy_type', 'all');
+        $marketCategory = $request->input('market_category', 'all');
+
+        if (!$date) return response()->json([], 400);
+
+        $trades = collect();
+
+        // 1. FUTURES
+        if ($strategyType === 'all' || $strategyType === 'Futures') {
+            $q = FuturesTrade::with('tradingAccount')
+                ->where(function($query) use ($date) {
+                    $query->where(function($q) use ($date) {
+                        $q->where('status', 'CLOSED')->whereDate('exit_date', $date);
+                    })->orWhere(function($q) use ($date) {
+                        $q->where('status', 'OPEN')->whereDate('entry_date', $date);
+                    });
+                })
+                ->whereHas('tradingAccount', function($sq) use ($userId, $marketCategory) {
+                    $sq->where('user_id', $userId);
+                    if ($marketCategory !== 'all') $sq->where('market_type', $marketCategory);
+                });
+            
+            if ($accountId !== 'all') $q->where('trading_account_id', $accountId);
+
+            $futures = $q->get()->map(function($t) {
+                $isOpen = $t->status === 'OPEN';
+                return [
+                    'id' => 'F-' . $t->id,
+                    'is_parent' => false,
+                    'time' => $isOpen ? ($t->entry_time ? $t->entry_date . ' ' . $t->entry_time : $t->entry_date) : ($t->exit_time ? $t->exit_date . ' ' . $t->exit_time : $t->exit_date),
+                    'account_name' => $t->tradingAccount->name ?? '-',
+                    'symbol' => $t->symbol,
+                    'side' => $t->type,
+                    // PERBAIKAN DISINI:
+                    'market_type' => $t->tradingAccount->market_type ?? '-', // CRYPTO/STOCK
+                    'strategy_type' => 'FUTURES', // FUTURES
+                    'price' => $isOpen ? $t->entry_price : $t->exit_price,
+                    'size' => $t->quantity,
+                    'pnl' => $t->pnl,
+                    'status' => $isOpen ? 'OPEN' : ($t->pnl > 0 ? 'WIN' : ($t->pnl < 0 ? 'LOSS' : 'BE')),
+                    'children' => []
+                ];
+            });
+            $trades = $trades->merge($futures);
+        }
+
+        // 2. SPOT
+        if ($strategyType === 'all' || $strategyType === 'Spot') {
+            $q = SpotTrade::with(['tradingAccount', 'spotTransactions'])
+                ->where(function($query) use ($date) {
+                    $query->whereDate('buy_date', $date)
+                          ->orWhereDate('sell_date', $date);
+                })
+                ->whereHas('tradingAccount', function($sq) use ($userId, $marketCategory) {
+                    $sq->where('user_id', $userId);
+                    if ($marketCategory !== 'all') $sq->where('market_type', $marketCategory);
+                });
+
+            if ($accountId !== 'all') $q->where('trading_account_id', $accountId);
+
+            $spots = $q->get()->map(function($t) use ($date) {
+                $isSoldToday = $t->sell_date == $date;
+                
+                $children = $t->spotTransactions->map(function($trans) {
+                    return [
+                        'id' => $trans->id,
+                        'date' => $trans->transaction_date,
+                        'time' => $trans->transaction_time,
+                        'type' => $trans->type, 
+                        'price' => $trans->price,
+                        'qty' => $trans->quantity,
+                        'pnl' => $trans->realized_pnl - $trans->fee
+                    ];
+                });
+
+                return [
+                    'id' => 'S-' . $t->id,
+                    'is_parent' => true,
+                    'time' => $isSoldToday 
+                                ? ($t->sell_time ? $t->sell_date . ' ' . $t->sell_time : $t->sell_date)
+                                : ($t->buy_time ? $t->buy_date . ' ' . $t->buy_time : $t->buy_date),
+                    'account_name' => $t->tradingAccount->name ?? '-',
+                    'symbol' => $t->symbol,
+                    'side' => $t->status === 'OPEN' ? 'HOLDING' : ($isSoldToday ? 'SOLD' : 'HOLDING'),
+                    // PERBAIKAN DISINI:
+                    'market_type' => $t->tradingAccount->market_type ?? '-', // CRYPTO/STOCK
+                    'strategy_type' => 'SPOT', // SPOT
+                    'price' => $t->price,
+                    'size' => $t->quantity,
+                    'pnl' => $t->pnl,
+                    'status' => $t->status === 'OPEN' ? 'HOLDING' : ($t->pnl > 0 ? 'WIN' : 'LOSS'),
+                    'children' => $children
+                ];
+            });
+            $trades = $trades->merge($spots);
+        }
+
+        $sortedTrades = $trades->sortByDesc('time')->values();
+        return response()->json($sortedTrades);
     }
 }
