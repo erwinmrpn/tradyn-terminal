@@ -12,6 +12,7 @@ use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\TradeLogController;
 use App\Http\Controllers\SpotController;
 use App\Http\Controllers\TradeCalendarController;
+use App\Http\Controllers\ReportController;
 
 // --- PUBLIC ROUTES ---
 Route::get('/', function () {
@@ -80,12 +81,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/trade-log/transaction/spot/{id}', [SpotController::class, 'storeTransaction']) ->name('trade.log.transaction.spot') ->middleware(['auth', 'verified']);
 
     // 13. Fungsi Spot Transaction
-    
     // Route untuk transaksi Spot (DCA/Sell)
     // Menggunakan TradeLogController, method storeTransaction
-Route::post('/trade-log/transaction/spot/{id}', [TradeLogController::class, 'storeTransaction'])
-    ->name('trade.log.transaction.spot')
-    ->middleware(['auth', 'verified']);
+    Route::post('/trade-log/transaction/spot/{id}', [TradeLogController::class, 'storeTransaction']) ->name('trade.log.transaction.spot') ->middleware(['auth', 'verified']);
+
+    // 14. Fungsi Route Report
+    Route::get('/report', function () {return Inertia::render('Report/Index');})->name('report.index');
 
 });
 
