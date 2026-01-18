@@ -96,32 +96,20 @@ const filteredAccounts = computed(() => {
     return props.accounts.filter(acc => acc.strategy_type === filterType);
 });
 
-// [UPDATED] Computed property to calculate displayed balance based on selection
+// Computed property to calculate displayed balance based on selection
 const displayedBalance = computed(() => {
-    // 1. If a specific account is selected, return its balance
     if (selectedAccount.value !== 'all') {
         const account = props.accounts.find(acc => acc.id.toString() === selectedAccount.value.toString());
         return account ? Number(account.balance) : 0;
     }
-
-    // 2. If 'All Accounts' is selected, return aggregated balance based on active tab
-    if (props.activeType === 'SPOT') {
-        return props.spotBalance;
-    } else if (props.activeType === 'FUTURES') {
-        return props.futuresBalance;
-    } else {
-        return props.totalBalance;
-    }
+    if (props.activeType === 'SPOT') return props.spotBalance;
+    else if (props.activeType === 'FUTURES') return props.futuresBalance;
+    else return props.totalBalance;
 });
 
 const applySmartDefaults = () => {
-    // Only auto-select if "All Accounts" isn't explicitly chosen by user logic 
-    // or if current selection is invalid for the new tab.
-    // For now, let's keep 'all' as valid if the list isn't empty to allow seeing totals.
     if (filteredAccounts.value.length > 0) {
         const isCurrentSelectionValid = filteredAccounts.value.some(acc => acc.id === selectedAccount.value);
-        
-        // If current selection is invalid for this tab, switch to 'all' or first account
         if (selectedAccount.value !== 'all' && !isCurrentSelectionValid) {
              selectedAccount.value = 'all'; 
         }
@@ -144,8 +132,6 @@ watch(resultSubTab, (newVal) => {
 watch(selectedAccount, (newAccount) => {
     let params: any = { type: props.activeType, account_id: newAccount };
     if (props.activeType === 'RESULT') params.result_type = resultSubTab.value;
-    
-    // Use router to fetch filtered data, preserving state to keep tabs active
     router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 });
 
@@ -169,10 +155,7 @@ const toggleSidebar = () => {
 const switchTab = (type: string) => {
     let params: any = { type: type, account_id: 'all' };
     if (type === 'RESULT') params.result_type = resultSubTab.value;
-    
-    // Reset selected account to 'all' when switching main tabs for better UX
     selectedAccount.value = 'all'; 
-    
     router.get(route('trade.log'), params, { preserveState: true, preserveScroll: true });
 };
 
@@ -278,6 +261,8 @@ const getHoldingClass = (period: string) => {
                         <table class="min-w-full text-left border-collapse">
                             <thead class="bg-[#1a1b20] text-gray-400 uppercase text-[10px] tracking-wider font-semibold">
                                 <tr>
+                                    <th v-if="props.activeType === 'SPOT'" class="px-4 py-3 w-10 text-center"></th>
+                                    
                                     <th class="px-6 py-3">Asset</th>
                                     <th class="px-6 py-3">{{ props.activeType === 'SPOT' ? 'Last Activity' : 'Entry / Exit Time' }}</th>
                                     <th class="px-6 py-3" v-if="props.activeType === 'FUTURES'">Type</th>
@@ -298,13 +283,27 @@ const getHoldingClass = (period: string) => {
                                     <th class="px-6 py-3 text-right">Chart</th>
                                     <th class="px-6 py-3 text-right">Notes</th>
                                     <th class="px-6 py-3 text-center">Status</th> 
-                                    <th class="px-6 py-3 text-center">Action</th>
+                                    
+                                    <th v-if="props.activeType === 'FUTURES'" class="px-6 py-3 text-center">Action</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-[#1f2128]">
                                 <template v-for="trade in props.trades" :key="trade.id">
-                                    <tr class="hover:bg-[#1a1b20]/50 transition-colors group text-sm" :class="{'bg-[#1a1b20]/30': expandedHistoryRows.has(trade.id)}">
+                                    
+                                    <tr class="hover:bg-[#1a1b20]/50 transition-colors group text-sm cursor-pointer" 
+                                        :class="{'bg-[#1a1b20]/30': expandedHistoryRows.has(trade.id)}"
+                                        @click="props.activeType === 'SPOT' ? toggleHistoryRow(trade.id) : null">
                                         
+                                        <td v-if="props.activeType === 'SPOT'" class="px-4 py-3 text-center">
+                                            <button class="text-gray-500 hover:text-white transition-colors p-1">
+                                                <svg class="w-4 h-4 transform transition-transform duration-200" 
+                                                    :class="expandedHistoryRows.has(trade.id) ? 'rotate-90' : ''"
+                                                    fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                                </svg>
+                                            </button>
+                                        </td>
+
                                         <td class="px-6 py-3">
                                             <div class="flex items-center gap-2">
                                                 <span class="font-bold text-white">{{ trade.symbol }}</span>
@@ -367,10 +366,10 @@ const getHoldingClass = (period: string) => {
 
                                         <td class="px-6 py-3 text-right font-bold text-yellow-500 text-xs font-mono">
                                             <div class="flex flex-col items-end gap-1">
-                                                <button v-if="trade.entry_screenshot || trade.buy_screenshot" @click.prevent="openImageModal(trade.entry_screenshot || trade.buy_screenshot, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
+                                                <button v-if="trade.entry_screenshot || trade.buy_screenshot" @click.stop="openImageModal(trade.entry_screenshot || trade.buy_screenshot, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
                                                     {{ props.activeType === 'SPOT' ? 'Buy Chart' : 'Entry Chart' }}
                                                 </button>
-                                                <button v-if="trade.exit_screenshot || trade.sell_screenshot" @click.prevent="openImageModal(trade.exit_screenshot || trade.sell_screenshot, props.activeType === 'SPOT' ? 'Sell' : 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">
+                                                <button v-if="trade.exit_screenshot || trade.sell_screenshot" @click.stop="openImageModal(trade.exit_screenshot || trade.sell_screenshot, props.activeType === 'SPOT' ? 'Sell' : 'Exit')" class="text-green-400 hover:text-green-300 underline focus:outline-none text-[10px]">
                                                     {{ props.activeType === 'SPOT' ? 'Sell Chart' : 'Exit Chart' }}
                                                 </button>
                                                 <span v-if="!trade.entry_screenshot && !trade.buy_screenshot && !trade.exit_screenshot && !trade.sell_screenshot" class="text-gray-600">-</span>
@@ -380,12 +379,12 @@ const getHoldingClass = (period: string) => {
                                         <td class="px-6 py-3 text-right font-bold text-xs font-mono">
                                             <div class="flex flex-col items-end gap-1">
                                                 <button v-if="trade.entry_notes || trade.buy_notes" 
-                                                    @click="viewNote(trade.entry_notes || trade.buy_notes, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" 
+                                                    @click.stop="viewNote(trade.entry_notes || trade.buy_notes, props.activeType === 'SPOT' ? 'Buy' : 'Entry')" 
                                                     class="text-blue-400 hover:text-blue-300 underline focus:outline-none text-[10px]">
                                                     {{ props.activeType === 'SPOT' ? 'Buy Note' : 'Entry Note' }}
                                                 </button>
                                                 <button v-if="trade.exit_notes || trade.sell_notes" 
-                                                    @click="viewNote(trade.exit_notes || trade.sell_notes, props.activeType === 'SPOT' ? 'Sell' : (trade.status === 'CANCELLED' ? 'Cancel' : 'Close'))" 
+                                                    @click.stop="viewNote(trade.exit_notes || trade.sell_notes, props.activeType === 'SPOT' ? 'Sell' : (trade.status === 'CANCELLED' ? 'Cancel' : 'Close'))" 
                                                     class="text-yellow-400 hover:text-yellow-300 underline focus:outline-none text-[10px]">
                                                     {{ props.activeType === 'SPOT' ? 'Sell Note' : (trade.status === 'CANCELLED' ? 'Cancel Note' : 'Close Note') }}
                                                 </button>
@@ -408,26 +407,32 @@ const getHoldingClass = (period: string) => {
                                             </span>
                                         </td>
 
-                                        <td class="px-6 py-3 text-center">
-                                            <div class="flex items-center justify-center gap-3">
-                                                <button v-if="props.activeType === 'SPOT'" @click="toggleHistoryRow(trade.id)" class="text-[10px] text-blue-400 hover:text-blue-300 font-bold underline decoration-blue-500/30 hover:decoration-blue-300 transition-all">
-                                                    {{ expandedHistoryRows.has(trade.id) ? 'Hide Transactions' : 'More Transactions' }}
-                                                </button>
-                                                
-                                                <button @click="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-1.5 rounded-full hover:bg-red-500/10" title="Delete Trade">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
-                                            </div>
+                                        <td v-if="props.activeType === 'FUTURES'" class="px-6 py-3 text-center">
+                                            <button @click.stop="confirmDelete(trade)" class="text-gray-600 hover:text-red-500 transition-colors p-1.5 rounded-full hover:bg-red-500/10" title="Delete Trade">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            </button>
                                         </td>
                                     </tr>
 
                                     <tr v-if="expandedHistoryRows.has(trade.id)" class="bg-[#0a0b0d] border-b border-[#2d2f36] animate-fade-in">
-                                        <td colspan="12" class="p-0">
-                                            <div class="p-4 pl-12 pr-12 border-l-2 border-blue-500/50 ml-6 my-2 bg-[#0f1012] rounded-r-lg">
-                                                <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                    Transaction History for {{ trade.symbol }}
-                                                </h4>
+                                        <td :colspan="props.activeType === 'SPOT' ? 12 : 12" class="p-0">
+                                            <div class="p-4 pl-12 pr-12 border-l-2 border-blue-500/50 ml-6 my-2 bg-[#0f1012] rounded-r-lg relative">
+                                                
+                                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+                                                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                        </svg>
+                                                        Transaction History for {{ trade.symbol }}
+                                                    </h4>
+
+                                                    <button v-if="props.activeType === 'SPOT'" @click="confirmDelete(trade)" class="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-all text-xs font-bold">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                        Delete Trade
+                                                    </button>
+                                                </div>
                                                 
                                                 <div v-if="trade.transactions && trade.transactions.length > 0" class="overflow-x-auto rounded border border-[#2d2f36]">
                                                     <table class="w-full text-left text-xs">
