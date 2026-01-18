@@ -17,14 +17,19 @@ interface Trade {
     time: string;
     account_name: string;
     symbol: string;
-    // Update Interface: Pisahkan Market dan Strategy
-    market_type: string;   // e.g. CRYPTO
-    strategy_type: 'FUTURES' | 'SPOT'; // e.g. SPOT
+    market_type: string;   
+    strategy_type: 'FUTURES' | 'SPOT'; 
     side: string;
     price: number;
     size: number;
     pnl: number;
     status: string;
+    // Data tambahan untuk Futures
+    leverage?: number;
+    fee?: number;
+    margin_mode?: string;
+    entry_notes?: string;
+    exit_notes?: string;
     children?: TransactionChild[]; 
 }
 
@@ -124,7 +129,10 @@ const gradientTextStyle = {
                             <th class="px-6 py-4 font-bold">Time</th>
                             <th class="px-6 py-4 font-bold">Account</th>
                             
-                            <th class="px-6 py-4 font-bold">Market</th> <th class="px-6 py-4 font-bold">Strategy</th> <th class="px-6 py-4 font-bold">Symbol</th>
+                            <th class="px-6 py-4 font-bold">Market</th> 
+                            <th class="px-6 py-4 font-bold">Strategy</th> 
+                            
+                            <th class="px-6 py-4 font-bold">Symbol</th>
                             <th class="px-6 py-4 font-bold">Side</th>
                             <th class="px-6 py-4 font-bold text-right">Price</th>
                             <th class="px-6 py-4 font-bold text-right">Size</th>
@@ -217,35 +225,63 @@ const gradientTextStyle = {
                             <tr v-if="trade.is_parent && expandedRows.has(trade.id)" class="bg-[#0f1013]">
                                 <td colspan="11" class="px-6 py-4 border-l-2 border-[#8c52ff]">
                                     <div class="bg-[#1f2128] rounded-lg p-4 border border-[#2d3039]">
-                                        <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-3">Transaction Details (DCA / Partial)</p>
-                                        <table class="w-full text-sm">
-                                            <thead>
-                                                <tr class="text-gray-500 text-xs border-b border-[#2d3039]">
-                                                    <th class="py-2 text-left">Date</th>
-                                                    <th class="py-2 text-left">Type</th>
-                                                    <th class="py-2 text-right">Price</th>
-                                                    <th class="py-2 text-right">Qty</th>
-                                                    <th class="py-2 text-right">Realized PnL</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr v-for="child in trade.children" :key="child.id" class="border-b border-[#2d3039]/50 last:border-0">
-                                                    <td class="py-2 text-gray-400">{{ formatDateShort(child.date) }} {{ formatTime(child.time) }}</td>
-                                                    <td class="py-2">
-                                                        <span class="text-[10px] px-1.5 py-0.5 rounded font-bold"
-                                                            :class="child.type === 'BUY' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'">
-                                                            {{ child.type }}
-                                                        </span>
-                                                    </td>
-                                                    <td class="py-2 text-right text-gray-300 font-mono">{{ new Intl.NumberFormat('en-US').format(child.price) }}</td>
-                                                    <td class="py-2 text-right text-gray-400 font-mono">{{ parseFloat(String(child.qty)) }}</td>
-                                                    <td class="py-2 text-right font-mono font-bold" 
-                                                        :class="child.pnl >= 0 ? 'text-green-400' : 'text-red-400'">
-                                                        {{ child.type === 'SELL' ? formatCurrency(child.pnl) : '-' }}
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
+                                        
+                                        <div v-if="trade.strategy_type === 'SPOT'">
+                                            <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-3">Transaction Details (DCA / Partial)</p>
+                                            <table class="w-full text-sm">
+                                                <thead>
+                                                    <tr class="text-gray-500 text-xs border-b border-[#2d3039]">
+                                                        <th class="py-2 text-left">Date</th>
+                                                        <th class="py-2 text-left">Type</th>
+                                                        <th class="py-2 text-right">Price</th>
+                                                        <th class="py-2 text-right">Qty</th>
+                                                        <th class="py-2 text-right">Realized PnL</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="child in trade.children" :key="child.id" class="border-b border-[#2d3039]/50 last:border-0">
+                                                        <td class="py-2 text-gray-400">{{ formatDateShort(child.date) }} {{ formatTime(child.time) }}</td>
+                                                        <td class="py-2">
+                                                            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                                                                :class="child.type === 'BUY' ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'">
+                                                                {{ child.type }}
+                                                            </span>
+                                                        </td>
+                                                        <td class="py-2 text-right text-gray-300 font-mono">{{ new Intl.NumberFormat('en-US').format(child.price) }}</td>
+                                                        <td class="py-2 text-right text-gray-400 font-mono">{{ parseFloat(String(child.qty)) }}</td>
+                                                        <td class="py-2 text-right font-mono font-bold" 
+                                                            :class="child.pnl >= 0 ? 'text-green-400' : 'text-red-400'">
+                                                            {{ child.type === 'SELL' ? formatCurrency(child.pnl) : '-' }}
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-2">Trade Info</p>
+                                                <div class="space-y-2 text-sm">
+                                                    <div class="flex justify-between border-b border-[#2d3039] pb-1">
+                                                        <span class="text-gray-400">Leverage</span>
+                                                        <span class="text-white font-mono">{{ trade.leverage }}x ({{ trade.margin_mode }})</span>
+                                                    </div>
+                                                    <div class="flex justify-between border-b border-[#2d3039] pb-1">
+                                                        <span class="text-gray-400">Fee</span>
+                                                        <span class="text-red-400 font-mono">{{ formatCurrency(trade.fee || 0) }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-2">Notes</p>
+                                                <div class="bg-[#121317] p-3 rounded border border-[#2d3039] text-sm text-gray-300 min-h-[60px]">
+                                                    <p v-if="trade.entry_notes"><span class="text-[#8c52ff] font-bold">Entry:</span> {{ trade.entry_notes }}</p>
+                                                    <p v-if="trade.exit_notes" class="mt-2"><span class="text-[#5ce1e6] font-bold">Exit:</span> {{ trade.exit_notes }}</p>
+                                                    <p v-if="!trade.entry_notes && !trade.exit_notes" class="text-gray-600 italic">No notes recorded.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                     </div>
                                 </td>
                             </tr>

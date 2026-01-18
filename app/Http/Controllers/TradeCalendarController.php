@@ -20,21 +20,27 @@ class TradeCalendarController extends Controller
         // Filter Inputs
         $selectedYear = $request->input('year', Carbon::now()->year);
         $accountId = $request->input('account_id', 'all');
+        
         // Strategy Type = Spot / Futures
         $strategyType = $request->input('strategy_type', 'all'); 
-        // Market Category = Crypto / Stock (sesuai kolom market_type di DB)
+        
+        // Market Category = Crypto / Stock / Commodity (sesuai kolom market_type di DB trading_accounts)
         $marketCategory = $request->input('market_category', 'all'); 
 
         // 1. GET AVAILABLE YEARS
+        // Kita ambil tahun dari semua kemungkinan tanggal (Exit Futures, Buy Spot, Sell Spot)
         $futuresYears = FuturesTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
             ->selectRaw('YEAR(exit_date) as year')->distinct();
-        $spotYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            
+        $spotBuyYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
+            ->selectRaw('YEAR(buy_date) as year')->distinct();
+            
+        $spotSellYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
             ->selectRaw('YEAR(sell_date) as year')->distinct();
             
         $availableYears = $futuresYears
-            ->union($spotBuyYears = SpotTrade::whereHas('tradingAccount', fn($q) => $q->where('user_id', $userId))
-            ->selectRaw('YEAR(buy_date) as year')->distinct())
-            ->union($spotYears)
+            ->union($spotBuyYears)
+            ->union($spotSellYears)
             ->orderBy('year', 'desc')
             ->pluck('year')
             ->filter()
@@ -52,8 +58,10 @@ class TradeCalendarController extends Controller
             ->all();
 
         // 3. PREPARE DAILY DATA QUERY
+        // Kita gunakan logika Looping PHP agar perhitungan konsisten dengan Detail View (Parent Trade Count)
         $dailyData = [];
 
+        // Helper function untuk mengisi array data harian
         $addToDaily = function($date, $pnl) use (&$dailyData) {
             if (!$date) return;
             if (!isset($dailyData[$date])) {
@@ -67,6 +75,7 @@ class TradeCalendarController extends Controller
         if ($strategyType === 'all' || $strategyType === 'Futures') {
             $futuresQuery = FuturesTrade::whereHas('tradingAccount', function($sq) use ($userId, $marketCategory) {
                 $sq->where('user_id', $userId);
+                // Filter Market Category (Crypto/Stock)
                 if ($marketCategory !== 'all') {
                     $sq->where('market_type', $marketCategory);
                 }
@@ -78,6 +87,7 @@ class TradeCalendarController extends Controller
 
             if ($accountId !== 'all') $futuresQuery->where('trading_account_id', $accountId);
             
+            // Ambil data yang diperlukan saja
             $futuresTrades = $futuresQuery->get(['entry_date', 'exit_date', 'status', 'pnl']);
 
             foreach ($futuresTrades as $trade) {
@@ -86,10 +96,18 @@ class TradeCalendarController extends Controller
                 $isClosed = $trade->status === 'CLOSED';
 
                 if ($isClosed && $entry == $exit) {
+                    // Kasus 1: Open & Close di hari yang sama -> Hitung 1x (di hari tersebut) + PnL
                     $addToDaily($exit, $trade->pnl);
                 } else {
-                    if ($entry && str_starts_with($entry, $selectedYear)) $addToDaily($entry, 0); 
-                    if ($isClosed && $exit && str_starts_with($exit, $selectedYear)) $addToDaily($exit, $trade->pnl);
+                    // Kasus 2: Beda Hari
+                    // Entry Event (Open Position) -> PnL 0
+                    if ($entry && str_starts_with($entry, $selectedYear)) {
+                        $addToDaily($entry, 0); 
+                    }
+                    // Exit Event (Close Position) -> Real PnL
+                    if ($isClosed && $exit && str_starts_with($exit, $selectedYear)) {
+                        $addToDaily($exit, $trade->pnl);
+                    }
                 }
             }
         }
@@ -114,13 +132,22 @@ class TradeCalendarController extends Controller
             foreach ($spotTrades as $trade) {
                 $buy = $trade->buy_date;
                 $sell = $trade->sell_date;
+                // Spot dianggap "Sold/Closed" jika sell_date terisi
                 $isSold = !empty($sell);
 
                 if ($isSold && $buy == $sell) {
+                    // Kasus 1: Beli & Jual Habis di hari yang sama (Scalping Spot) -> Hitung 1x
                     $addToDaily($sell, $trade->pnl);
                 } else {
-                    if ($buy && str_starts_with($buy, $selectedYear)) $addToDaily($buy, 0);
-                    if ($isSold && $sell && str_starts_with($sell, $selectedYear)) $addToDaily($sell, $trade->pnl);
+                    // Kasus 2: Beda Hari
+                    // Entry Event (Buy/Holding) -> PnL 0
+                    if ($buy && str_starts_with($buy, $selectedYear)) {
+                        $addToDaily($buy, 0);
+                    }
+                    // Exit Event (Sold) -> Real PnL
+                    if ($isSold && $sell && str_starts_with($sell, $selectedYear)) {
+                        $addToDaily($sell, $trade->pnl);
+                    }
                 }
             }
         }
@@ -155,7 +182,7 @@ class TradeCalendarController extends Controller
 
         return Inertia::render('TradeCalendar/Index', [
             'availableYears' => $availableYears,
-            'availableMarketTypes' => $availableMarketTypes,
+            'availableMarketTypes' => $availableMarketTypes, 
             'selectedYear' => (int)$selectedYear,
             'monthlyOverview' => $monthlyOverview,
             'dailyData' => $dailyData, 
@@ -168,7 +195,7 @@ class TradeCalendarController extends Controller
         ]);
     }
 
-    // --- METHOD GET DETAILS (FIXED MARKET VS STRATEGY) ---
+    // --- METHOD GET DETAILS (FIXED: Parent Logic & Extra Details for Futures) ---
     public function getDetails(Request $request)
     {
         $userId = auth()->id();
@@ -202,19 +229,27 @@ class TradeCalendarController extends Controller
                 $isOpen = $t->status === 'OPEN';
                 return [
                     'id' => 'F-' . $t->id,
-                    'is_parent' => false,
-                    'time' => $isOpen ? ($t->entry_time ? $t->entry_date . ' ' . $t->entry_time : $t->entry_date) : ($t->exit_time ? $t->exit_date . ' ' . $t->exit_time : $t->exit_date),
+                    'is_parent' => true, // TRUE agar bisa di-expand untuk melihat detail notes/fee
+                    'time' => $isOpen ? ($t->entry_time ? $t->entry_date . ' ' . $t->entry_time : $t->entry_date) 
+                                      : ($t->exit_time ? $t->exit_date . ' ' . $t->exit_time : $t->exit_date),
                     'account_name' => $t->tradingAccount->name ?? '-',
                     'symbol' => $t->symbol,
                     'side' => $t->type,
-                    // PERBAIKAN DISINI:
-                    'market_type' => $t->tradingAccount->market_type ?? '-', // CRYPTO/STOCK
-                    'strategy_type' => 'FUTURES', // FUTURES
+                    // Pemetaan Type yang Benar
+                    'market_type' => $t->tradingAccount->market_type ?? '-', // Contoh: CRYPTO
+                    'strategy_type' => 'FUTURES', // Label Strategy
                     'price' => $isOpen ? $t->entry_price : $t->exit_price,
                     'size' => $t->quantity,
                     'pnl' => $t->pnl,
                     'status' => $isOpen ? 'OPEN' : ($t->pnl > 0 ? 'WIN' : ($t->pnl < 0 ? 'LOSS' : 'BE')),
-                    'children' => []
+                    
+                    // Detail tambahan untuk Dropdown Info Futures
+                    'leverage' => $t->leverage,
+                    'margin_mode' => $t->margin_mode,
+                    'fee' => $t->fee,
+                    'entry_notes' => $t->entry_notes,
+                    'exit_notes' => $t->exit_notes,
+                    'children' => [] // Array kosong karena tidak ada sub-transaksi seperti Spot
                 ];
             });
             $trades = $trades->merge($futures);
@@ -237,6 +272,7 @@ class TradeCalendarController extends Controller
             $spots = $q->get()->map(function($t) use ($date) {
                 $isSoldToday = $t->sell_date == $date;
                 
+                // Map sub-transaksi untuk dropdown Spot
                 $children = $t->spotTransactions->map(function($trans) {
                     return [
                         'id' => $trans->id,
@@ -258,9 +294,9 @@ class TradeCalendarController extends Controller
                     'account_name' => $t->tradingAccount->name ?? '-',
                     'symbol' => $t->symbol,
                     'side' => $t->status === 'OPEN' ? 'HOLDING' : ($isSoldToday ? 'SOLD' : 'HOLDING'),
-                    // PERBAIKAN DISINI:
-                    'market_type' => $t->tradingAccount->market_type ?? '-', // CRYPTO/STOCK
-                    'strategy_type' => 'SPOT', // SPOT
+                    // Pemetaan Type yang Benar
+                    'market_type' => $t->tradingAccount->market_type ?? '-', // Contoh: STOCK
+                    'strategy_type' => 'SPOT', // Label Strategy
                     'price' => $t->price,
                     'size' => $t->quantity,
                     'pnl' => $t->pnl,
